@@ -1,6 +1,6 @@
 name: wa_number_checker
 description: "Check whether a phone number is registered on WhatsApp (and/or WhatsApp Business) via on-device contact sync. Android-only; iOS returns unsupported."
-version: 0.1.0
+version: 0.1.1
 homepage: https://github.com/Achmad-irfanda/wa_number_checker
 repository: https://github.com/Achmad-irfanda/wa_number_checker
 

@@ -1,3 +1,7 @@
+## 0.1.1
+
+* Fix dead relative link (`../wa_poc`) in README.
+
 ## 0.1.0
 
 * Initial release.

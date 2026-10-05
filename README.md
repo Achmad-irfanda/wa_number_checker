@@ -67,4 +67,4 @@ Kotlin. Inserts are rate-limited (1 per 10s) and always run off the UI thread.
   `getDeviceInfo()`, `dispose()`.
 
 See `example/` for a registration-form demo. Field-tested on Samsung/OneUI
-with Google-default storage and power-save on (see `../wa_poc`).
+with Google-default storage and power-save on.
