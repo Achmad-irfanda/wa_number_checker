@@ -8,7 +8,7 @@ final checker = WaNumberChecker();
 final ok = await WaPermissionGate.ensureReady(
   context,
   appName: 'MyApp', // your app's name, shown in the rationale dialog
-  purpose: 'memverifikasi nomor WA milikmu untuk pengiriman struk',
+  purpose: 'verfied your number WhatsApp for One Time Password',
 );
 if (!ok) return;
 

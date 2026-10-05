@@ -1,3 +1,9 @@
+
+## 0.1.2
+
+* update ui: example demo app library use for common user
+* split `log` version stepper with divieder
+
 ## 0.1.1
 
 * Fix dead relative link (`../wa_poc`) in README.
