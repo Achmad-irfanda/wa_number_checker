@@ -53,4 +53,12 @@ class WaPermissionGate {
     final res = await Permission.contacts.request();
     return res.isGranted;
   }
+
+  /// Izin notifikasi (Android 13+) untuk notifikasi "kembali ke app"
+  /// setelah WA dibuka lewat `confirmOpenWhatsApp`. Opsional: tanpa izin
+  /// ini pengecekan tetap jalan, user hanya perlu kembali sendiri.
+  static Future<bool> ensureNotifications() async {
+    final res = await Permission.notification.request();
+    return res.isGranted;
+  }
 }

@@ -59,7 +59,7 @@ class NativeBridge {
     String phone,
   ) async {
     final m = await _methods
-        .invokeMapMethod<String, dynamic>('queryWa', {'phone': phone})
+        .invokeMapMethod<String, dynamic>('checkExisting', {'phone': phone})
         .catchError((Object e) {
           if (e is PlatformException && e.code == 'UNSUPPORTED') {
             return <String, dynamic>{'found': false, 'detectedBy': []};
@@ -78,10 +78,12 @@ class NativeBridge {
   Future<({int contactId, int rawContactId})> insertTemp(
     String phone,
     String tag,
+    int maxStored,
   ) async {
     final m = await _methods.invokeMapMethod<String, dynamic>('insertTemp', {
       'phone': phone,
       'tag': tag,
+      'maxStored': maxStored,
     });
     return (
       contactId: (m?['contactId'] as num? ?? -1).toInt(),
@@ -108,6 +110,52 @@ class NativeBridge {
   Future<void> stopObserver() async {
     try {
       await _methods.invokeMethod('stopObserver');
+    } catch (_) {}
+  }
+
+  /// Buka WA ke layar (pemicu WA mengecek kontak baru). False jika gagal.
+  Future<bool> openWhatsApp() async {
+    try {
+      return await _methods.invokeMethod<bool>('openWhatsApp') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Notifikasi "ketuk untuk kembali". False jika notifikasi tidak diizinkan.
+  Future<bool> showReturnNotice(String title, String body) async {
+    try {
+      return await _methods.invokeMethod<bool>('showReturnNotice', {
+            'title': title,
+            'body': body,
+          }) ??
+          false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Notifikasi progress selama menunggu WA; bar terisi sampai [duration].
+  Future<bool> showProgressNotice(
+    String title,
+    String body,
+    Duration duration,
+  ) async {
+    try {
+      return await _methods.invokeMethod<bool>('showProgressNotice', {
+            'title': title,
+            'body': body,
+            'durationMs': duration.inMilliseconds,
+          }) ??
+          false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> cancelReturnNotice() async {
+    try {
+      await _methods.invokeMethod('cancelReturnNotice');
     } catch (_) {}
   }
 

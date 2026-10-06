@@ -29,7 +29,8 @@ public class WaNumberCheckerPlugin: NSObject, FlutterPlugin {
         "unsupported": true,
       ])
     case "checkExisting", "insertTemp", "deleteContact",
-      "ensureTempAccount", "startObserver", "stopObserver":
+      "ensureTempAccount", "startObserver", "stopObserver",
+      "openWhatsApp", "showReturnNotice", "showProgressNotice", "cancelReturnNotice":
       result(
         FlutterError(
           code: "UNSUPPORTED",

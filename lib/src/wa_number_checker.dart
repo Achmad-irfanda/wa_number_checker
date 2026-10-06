@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import 'data/native_bridge.dart';
@@ -38,17 +39,34 @@ class WaNumberChecker {
   bool _disposed = false;
   StreamSubscription? _observerSub;
 
+  /// Menghentikan watch yang masih berjalan (hapus kontak temp-nya juga).
+  Future<void> Function()? _abortWatch;
+
+  /// Menutup notifikasi "kembali ke app" saat user sudah kembali.
+  AppLifecycleListener? _lifecycle;
+
   /// Lapis simpel (80% consumer): check-then-insert otomatis.
+  ///
+  /// WA di background tidak mengecek kontak baru, jadi nomor yang belum
+  /// dikenal perangkat hampir selalu berakhir `pending`. Beri
+  /// [confirmOpenWhatsApp] (mis. dialog persetujuan) agar WA dibuka saat
+  /// insert memang diperlukan; setelah selesai user mendapat notifikasi
+  /// untuk kembali. Callback hanya dipanggil bila fast-path gagal.
   Future<WaCheckResult> verify(
     String phone, {
     Duration? timeout,
     bool? cleanup,
+    Future<bool> Function()? confirmOpenWhatsApp,
   }) async {
     final myGen = ++_generation;
     final normalized = normalizeWaPhone(phone);
     final clean = cleanup ?? config.autoCleanup;
 
     bool cancelled() => myGen != _generation || _disposed;
+
+    // Watch lama dihentikan sekarang, bukan dibiarkan sampai timeout-nya:
+    // teardown-nya mematikan observer yang dipakai bersama.
+    await _abortWatch?.call();
 
     // 0. Izin (library tidak request sendiri).
     if (!await Permission.contacts.isGranted) {
@@ -113,12 +131,20 @@ class WaNumberChecker {
     }
 
     // 4. Insert + watch.
+    final openWa = confirmOpenWhatsApp != null && await confirmOpenWhatsApp();
+    if (cancelled()) {
+      return WaCheckResult(
+        status: WaCheckStatus.cancelled,
+        normalized: normalized,
+      );
+    }
     return checkWithInsert(
       phone,
       timeout: timeout,
       cleanup: clean,
       generation: myGen,
       preloadedInfo: info,
+      openWhatsApp: openWa,
     );
   }
 
@@ -191,19 +217,25 @@ class WaNumberChecker {
 
   /// Advance: insert kontak sementara di akun temp + watch sync.
   /// [cancel] otomatis dipanggil untuk watch sebelumnya.
+  ///
+  /// [openWhatsApp] membuka WA setelah insert (pemicu WA mengecek nomor
+  /// baru) dan memberi notifikasi "kembali ke app" saat hasilnya keluar.
   Future<WaCheckResult> checkWithInsert(
     String phone, {
     Duration? timeout,
     bool? cleanup,
     int? generation,
     WaDeviceInfo? preloadedInfo,
+    bool openWhatsApp = false,
   }) async {
     final myGen = generation ?? ++_generation;
     final normalized = normalizeWaPhone(phone);
-    final limit = timeout ?? config.timeout;
+    final limit =
+        timeout ?? (openWhatsApp ? config.openWhatsAppTimeout : config.timeout);
     final clean = cleanup ?? config.autoCleanup;
     bool cancelled() => myGen != _generation || _disposed;
 
+    await _abortWatch?.call();
     if (!await Permission.contacts.isGranted) {
       return WaCheckResult(
         status: WaCheckStatus.permissionDenied,
@@ -220,7 +252,11 @@ class WaNumberChecker {
     int? contactId;
     try {
       await _bridge.startObserver();
-      final ins = await _bridge.insertTemp(phone, config.contactTag);
+      final ins = await _bridge.insertTemp(
+        phone,
+        config.contactTag,
+        config.maxStoredContacts,
+      );
       contactId = ins.contactId;
       _lastContactId = contactId;
       _lastInsertAt = DateTime.now();
@@ -236,7 +272,9 @@ class WaNumberChecker {
       );
     }
     if (cancelled()) {
-      await _finishWatch(contactId: contactId, cleanup: true);
+      // Observer mungkin sudah milik watch yang lebih baru — jangan disentuh.
+      await _bridge.deleteContact(contactId);
+      if (_lastContactId == contactId) _lastContactId = null;
       return WaCheckResult(
         status: WaCheckStatus.cancelled,
         normalized: normalized,
@@ -246,19 +284,35 @@ class WaNumberChecker {
     final completer = Completer<WaCheckResult>();
     Timer? timer;
 
-    Future<void> finish(WaCheckResult r) async {
-      if (completer.isCompleted) return;
+    var finishing = false;
+    var waOpened = false;
+    late final Future<void> Function() abort;
+
+    Future<void> finish(WaCheckResult r, {bool forceCleanup = false}) async {
+      if (finishing) return;
+      finishing = true;
       timer?.cancel();
+      if (_abortWatch == abort) _abortWatch = null;
       await _finishWatch(
         contactId: contactId,
-        cleanup: clean && r.status != WaCheckStatus.cancelled,
+        cleanup: forceCleanup || (clean && r.status != WaCheckStatus.cancelled),
       );
-      if (r.status == WaCheckStatus.registered) _lastContactId = null;
+      // Kontak yang sengaja disimpan bukan lagi "sisa" untuk cancel().
+      if (r.status != WaCheckStatus.cancelled && _lastContactId == contactId) {
+        _lastContactId = null;
+      }
+      if (waOpened) await _showReturnNotice(r.status);
       completer.complete(r);
     }
 
+    abort = () => finish(
+      WaCheckResult(status: WaCheckStatus.cancelled, normalized: normalized),
+      forceCleanup: true,
+    );
+    _abortWatch = abort;
+
     Future<void> poll({bool silent = true}) async {
-      if (completer.isCompleted || cancelled()) return;
+      if (finishing || cancelled()) return;
       try {
         final r = await _bridge.checkExisting(phone);
         if (cancelled()) {
@@ -295,13 +349,29 @@ class WaNumberChecker {
       onError: (_) {},
     );
     await poll();
+    if (openWhatsApp && !finishing) {
+      waOpened = await _bridge.openWhatsApp();
+      if (waOpened) {
+        hints.add('waOpened');
+        _lifecycle ??= AppLifecycleListener(
+          onResume: _bridge.cancelReturnNotice,
+        );
+        await _bridge.showProgressNotice(
+          config.progressNoticeTitle,
+          config.progressNoticeBody,
+          limit,
+        );
+      }
+    }
     timer = Timer(limit, () async {
-      // Timeout bukan vonis negatif: bedakan pending dari notRegistered.
-      // Sinyal tidak langsung (observer fire tapi target tak muncul)
-      // butuh tracking sync per-app — v0.1.0 konservatif → pending.
+      // Tanpa WA terbuka, timeout bukan vonis negatif → pending. Dengan WA
+      // terbuka nomor terdaftar muncul dalam hitungan detik, jadi habisnya
+      // waktu dibaca sebagai tidak terdaftar.
       await finish(
         WaCheckResult(
-          status: WaCheckStatus.pending,
+          status: waOpened
+              ? WaCheckStatus.notRegistered
+              : WaCheckStatus.pending,
           normalized: normalized,
           installedApps: info.installedApps,
           activeApps: info.activeApps,
@@ -325,9 +395,28 @@ class WaNumberChecker {
   /// Batalkan watch yang sedang berjalan + bersihkan sisa kontak temp.
   Future<void> cancel() async {
     _generation++;
+    await _abortWatch?.call();
     final id = _lastContactId;
     _lastContactId = null;
     await _finishWatch(contactId: id, cleanup: true);
+  }
+
+  /// User masih di WA saat hasil keluar → notifikasi progress diganti
+  /// notifikasi hasil ("ketuk untuk kembali").
+  Future<void> _showReturnNotice(WaCheckStatus status) async {
+    final state = WidgetsBinding.instance.lifecycleState;
+    if (status == WaCheckStatus.cancelled ||
+        state == null ||
+        state == AppLifecycleState.resumed) {
+      // Tidak ada yang perlu diberitahukan — tutup notifikasi progress.
+      await _bridge.cancelReturnNotice();
+      return;
+    }
+    final invalid = status == WaCheckStatus.notRegistered;
+    await _bridge.showReturnNotice(
+      invalid ? config.notRegisteredNoticeTitle : config.returnNoticeTitle,
+      invalid ? config.notRegisteredNoticeBody : config.returnNoticeBody,
+    );
   }
 
   Future<void> _finishWatch({int? contactId, required bool cleanup}) async {
@@ -347,6 +436,7 @@ class WaNumberChecker {
     _generation++;
     _observerSub?.cancel();
     _bridge.stopObserver();
+    _lifecycle?.dispose();
   }
 }
 

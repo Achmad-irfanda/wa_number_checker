@@ -45,9 +45,10 @@ void main() {
   });
 
   group('WaCheckerConfig', () {
-    test('default aman: cleanup on, timeout 15s', () {
+    test('default: kontak disimpan (maks 100), timeout 15s', () {
       const c = WaCheckerConfig();
-      expect(c.autoCleanup, isTrue);
+      expect(c.autoCleanup, isFalse);
+      expect(c.maxStoredContacts, 100);
       expect(c.timeout, const Duration(seconds: 15));
     });
   });
