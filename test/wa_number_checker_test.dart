@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wa_number_checker/wa_number_checker.dart';
 
@@ -63,6 +64,29 @@ void main() {
       expect(r.isValid, isTrue);
       expect(r.detectedBy, hasLength(2));
     });
+  });
+
+  group('platform selain Android', () {
+    // Tanpa mock channel: kalau guard bocor, panggilan ini melempar
+    // MissingPluginException.
+    for (final platform in [TargetPlatform.iOS, TargetPlatform.macOS]) {
+      test('$platform -> unsupported tanpa menyentuh channel', () async {
+        debugDefaultTargetPlatformOverride = platform;
+        addTearDown(() => debugDefaultTargetPlatformOverride = null);
+        final checker = WaNumberChecker();
+
+        expect((await checker.getDeviceInfo()).unsupported, isTrue);
+        for (final r in [
+          await checker.verify('08221234567'),
+          await checker.checkExisting('08221234567'),
+          await checker.checkWithInsert('08221234567'),
+        ]) {
+          expect(r.status, WaCheckStatus.unsupported);
+          expect(r.normalized, '628221234567');
+        }
+        debugDefaultTargetPlatformOverride = null;
+      });
+    }
   });
 }
 

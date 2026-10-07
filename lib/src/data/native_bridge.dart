@@ -16,11 +16,26 @@ class NativeBridge {
   @visibleForTesting
   MethodChannel get debugMethods => _methods;
 
+  /// Plugin native hanya terdaftar di Android; di platform lain channel
+  /// tidak punya handler, jadi jangan disentuh sama sekali.
+  static bool get isSupported =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+
   Future<String> normalize(String phone) async =>
       (await _methods.invokeMethod<String>('normalize', {'phone': phone})) ??
       phone;
 
   Future<WaDeviceInfo> getDeviceInfo() async {
+    if (!isSupported) {
+      return const WaDeviceInfo(
+        installedApps: {},
+        activeApps: {},
+        online: false,
+        powerSave: false,
+        tempAccountReady: false,
+        unsupported: true,
+      );
+    }
     final m = await _methods.invokeMapMethod<String, dynamic>('getDeviceInfo');
     Set<WaApp> apps(String key, {required bool flag}) {
       final out = <WaApp>{};
@@ -103,7 +118,7 @@ class NativeBridge {
     try {
       await _methods.invokeMethod('startObserver');
     } catch (_) {
-      // iOS stub: tidak ada observer, re-query mengandalkan timeout saja
+      // tanpa observer, re-query mengandalkan timeout saja
     }
   }
 

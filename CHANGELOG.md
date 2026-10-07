@@ -4,6 +4,13 @@
 * Apps that still build with Android Gradle Plugin 8 need
   `permission_handler: ^12.0.3` in their own `pubspec.yaml`:
   `permission_handler` 13.x requires Android Gradle Plugin 9. See the README.
+* Removes the iOS stub and the `ios` platform declaration, so the package is
+  listed as Android-only. It can still be a dependency of an app that also
+  targets iOS.
+* On every platform other than Android, checks return `unsupported` from Dart
+  without touching the platform channel or the contacts permission. Before,
+  iOS answered `permissionDenied` until contacts access was granted, and
+  platforms without the stub threw `MissingPluginException`.
 
 
 ## 0.2.0

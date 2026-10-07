@@ -22,7 +22,8 @@ import 'domain/wa_device_info.dart';
 /// ```
 ///
 /// Android-only (sync WA/WA Business via Contacts Provider + akun temp
-/// `com.wa_checker.temp`). iOS selalu [WaCheckStatus.unsupported].
+/// `com.wa_checker.temp`). Platform lain selalu
+/// [WaCheckStatus.unsupported].
 /// Library tidak meminta izin sendiri — pakai
 /// [WaPermissionGate.ensureReady] (butuh `appName` app consumer) atau
 /// minta izin dengan UX milikmu, lalu panggil [verify].
@@ -67,6 +68,14 @@ class WaNumberChecker {
     // Watch lama dihentikan sekarang, bukan dibiarkan sampai timeout-nya:
     // teardown-nya mematikan observer yang dipakai bersama.
     await _abortWatch?.call();
+
+    // Di luar Android tidak ada plugin native maupun izin yang relevan.
+    if (!NativeBridge.isSupported) {
+      return WaCheckResult(
+        status: WaCheckStatus.unsupported,
+        normalized: normalized,
+      );
+    }
 
     // 0. Izin (library tidak request sendiri).
     if (!await Permission.contacts.isGranted) {
@@ -151,6 +160,12 @@ class WaNumberChecker {
   /// Read-only: nomor sudah ada + punya raw contact WA?
   Future<WaCheckResult> checkExisting(String phone) async {
     final normalized = normalizeWaPhone(phone);
+    if (!NativeBridge.isSupported) {
+      return WaCheckResult(
+        status: WaCheckStatus.unsupported,
+        normalized: normalized,
+      );
+    }
     if (!await Permission.contacts.isGranted) {
       return WaCheckResult(
         status: WaCheckStatus.permissionDenied,
@@ -236,6 +251,12 @@ class WaNumberChecker {
     bool cancelled() => myGen != _generation || _disposed;
 
     await _abortWatch?.call();
+    if (!NativeBridge.isSupported) {
+      return WaCheckResult(
+        status: WaCheckStatus.unsupported,
+        normalized: normalized,
+      );
+    }
     if (!await Permission.contacts.isGranted) {
       return WaCheckResult(
         status: WaCheckStatus.permissionDenied,

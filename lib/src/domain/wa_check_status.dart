@@ -26,7 +26,7 @@ enum WaCheckStatus {
   /// Izin kontak belum diberikan.
   permissionDenied,
 
-  /// Platform tidak didukung (iOS).
+  /// Platform tidak didukung (selain Android).
   unsupported,
 
   /// Insert ke provider ditolak (mis. kebijakan ROM). Netral.

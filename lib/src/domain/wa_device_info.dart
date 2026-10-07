@@ -17,7 +17,7 @@ class WaDeviceInfo {
   final bool powerSave;
   final bool tempAccountReady;
 
-  /// True di iOS (library Android-only).
+  /// True di luar Android (library Android-only).
   final bool unsupported;
 
   bool get hasAnyInstalled => installedApps.isNotEmpty;

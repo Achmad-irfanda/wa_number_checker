@@ -119,7 +119,9 @@ dependencies:
 
 ## Honest limitations
 
-- **Android-only.** iOS always returns `WaCheckStatus.unsupported`.
+- **Android-only.** iOS has no equivalent signal: WhatsApp does not write
+  anything to the shared address book there. The package can still be a
+  dependency of an iOS app; every check returns `WaCheckStatus.unsupported`.
 - **WhatsApp must be on screen to detect a new number.** In the background it
   does not react to contact changes, and recent Android versions also cut its
   network access there. Numbers already known on the device are not affected.

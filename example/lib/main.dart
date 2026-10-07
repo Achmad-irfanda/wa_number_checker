@@ -2,7 +2,7 @@
 //
 // Shows the recommended integration: a manual "Check and Verify" button.
 //
-// How a check works (Android only, iOS always returns `unsupported`):
+// How a check works (Android only, other platforms always return `unsupported`):
 //
 //   1. Local lookup. If WhatsApp has already marked the number in the device
 //      contacts, the result is `registered` immediately. Nothing is inserted
@@ -104,7 +104,7 @@ class _ExampleHomeState extends State<ExampleHome> {
     WaCheckStatus.waNotInstalled => '… WA is not installed on this device',
     WaCheckStatus.waNotActive => '… WA is installed but not logged in',
     WaCheckStatus.permissionDenied => '… Contacts permission not granted',
-    WaCheckStatus.unsupported => '… platform not supported (iOS)',
+    WaCheckStatus.unsupported => '… platform not supported (Android only)',
     WaCheckStatus.storageBlocked => '… storage blocked by ROM policy',
     WaCheckStatus.cancelled => '… cancelled',
   };

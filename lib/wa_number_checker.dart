@@ -1,6 +1,6 @@
 /// `wa_number_checker` — cek nomor WhatsApp via sync Contacts Provider.
 ///
-/// Android-only. iOS selalu [WaCheckStatus.unsupported].
+/// Android-only. Platform lain selalu [WaCheckStatus.unsupported].
 library;
 
 export 'src/data/phone_normalizer.dart';
