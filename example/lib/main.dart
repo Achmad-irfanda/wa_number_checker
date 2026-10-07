@@ -181,7 +181,6 @@ class _ExampleHomeState extends State<ExampleHome> {
       // Leave this out if your app must never open WhatsApp.
       confirmOpenWhatsApp: confirmOpenWhatsApp,
     );
-    print("result $r");
     if (mounted) setState(() => result = r);
     setState(() => checking = false);
   }

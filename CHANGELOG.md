@@ -1,3 +1,10 @@
+## 0.2.1
+
+* Widens `permission_handler` to `>=12.0.1 <14.0.0` (was `^11.3.1`).
+* Apps that still build with Android Gradle Plugin 8 need
+  `permission_handler: ^12.0.3` in their own `pubspec.yaml`:
+  `permission_handler` 13.x requires Android Gradle Plugin 9. See the README.
+
 
 ## 0.2.0
 

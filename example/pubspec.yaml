@@ -29,6 +29,10 @@ dependencies:
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
 
+  # permission_handler 13.x pulls permission_handler_android 14.x, which
+  # requires AGP 9. This example still builds with AGP 8, so stay on 12.x.
+  permission_handler: ^12.0.3
+
 dev_dependencies:
   integration_test:
     sdk: flutter

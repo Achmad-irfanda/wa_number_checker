@@ -105,6 +105,18 @@ WaNumberChecker(
 );
 ```
 
+## Android Gradle Plugin 8
+
+`permission_handler` 13.x requires Android Gradle Plugin 9. If your app still
+builds with Android Gradle Plugin 8, the build fails in
+`permission_handler_android` with `Unresolved reference: compilerOptions`.
+Stay on 12.x by adding this to your app's `pubspec.yaml`:
+
+```yaml
+dependencies:
+  permission_handler: ^12.0.3
+```
+
 ## Honest limitations
 
 - **Android-only.** iOS always returns `WaCheckStatus.unsupported`.
