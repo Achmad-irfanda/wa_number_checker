@@ -138,11 +138,18 @@ class NativeBridge {
   }
 
   /// Notifikasi "ketuk untuk kembali". False jika notifikasi tidak diizinkan.
-  Future<bool> showReturnNotice(String title, String body) async {
+  Future<bool> showReturnNotice(
+    String title,
+    String body, {
+    String actionText = 'Kembali ke aplikasi',
+    String style = 'standard',
+  }) async {
     try {
       return await _methods.invokeMethod<bool>('showReturnNotice', {
             'title': title,
             'body': body,
+            'actionText': actionText,
+            'style': style,
           }) ??
           false;
     } catch (_) {
@@ -154,15 +161,28 @@ class NativeBridge {
   Future<bool> showProgressNotice(
     String title,
     String body,
-    Duration duration,
-  ) async {
+    Duration duration, {
+    String actionText = 'Kembali ke aplikasi',
+    String style = 'standard',
+  }) async {
     try {
       return await _methods.invokeMethod<bool>('showProgressNotice', {
             'title': title,
             'body': body,
             'durationMs': duration.inMilliseconds,
+            'actionText': actionText,
+            'style': style,
           }) ??
           false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Bawa aplikasi kembali ke foreground saat verifikasi selesai.
+  Future<bool> bringAppToForeground() async {
+    try {
+      return await _methods.invokeMethod<bool>('bringAppToForeground') ?? false;
     } catch (_) {
       return false;
     }
@@ -171,6 +191,13 @@ class NativeBridge {
   Future<void> cancelReturnNotice() async {
     try {
       await _methods.invokeMethod('cancelReturnNotice');
+    } catch (_) {}
+  }
+
+  /// Tampilkan atau sembunyikan tombol aksi "kembali ke aplikasi" secara dinamis.
+  Future<void> setNoticeActionVisible(bool visible) async {
+    try {
+      await _methods.invokeMethod('setNoticeActionVisible', {'visible': visible});
     } catch (_) {}
   }
 

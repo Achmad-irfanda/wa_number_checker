@@ -1,3 +1,16 @@
+/// Gaya tampilan notifikasi heads-up saat WhatsApp dibuka.
+enum WaNoticeStyle {
+  /// Pendekatan A: Standard Rich Notification bawaan Android.
+  /// Menggunakan BigTextStyle, timer/chronometer sistem, progress bar,
+  /// dan tombol action [Kembali ke Aplikasi].
+  standard,
+
+  /// Pendekatan B: Custom Layout (RemoteViews).
+  /// Menggunakan layout XML khusus yang lebih luas dengan timer,
+  /// teks proses multi-baris, progress bar, dan tombol custom [Kembali ke Aplikasi].
+  custom,
+}
+
 /// Konfigurasi global [WaNumberChecker].
 ///
 /// Semua nilai bisa di-override per panggilan (`verify(..., timeout: ...)`
@@ -10,6 +23,9 @@ class WaCheckerConfig {
     this.minInsertInterval = const Duration(seconds: 10),
     this.contactTag = 'WA_CHECK',
     this.openWhatsAppTimeout = const Duration(seconds: 15),
+    this.noticeStyle = WaNoticeStyle.standard,
+    this.returnActionText = 'Kembali ke aplikasi',
+    this.autoReturn = true,
     this.progressNoticeTitle = 'Memverifikasi nomor WhatsApp…',
     this.progressNoticeBody = 'Mohon tunggu sebentar',
     this.returnNoticeTitle = 'Verifikasi selesai',
@@ -18,6 +34,17 @@ class WaCheckerConfig {
     this.notRegisteredNoticeBody =
         'Nomor tidak terdaftar di WhatsApp. Ketuk untuk kembali ke aplikasi',
   });
+
+  /// Gaya tampilan notifikasi: [WaNoticeStyle.standard] (Pendekatan A)
+  /// atau [WaNoticeStyle.custom] (Pendekatan B).
+  final WaNoticeStyle noticeStyle;
+
+  /// Teks tombol aksi pada notifikasi untuk kembali ke aplikasi client.
+  final String returnActionText;
+
+  /// Otomatis membawa user kembali ke aplikasi client begitu verifikasi selesai.
+  /// Default: `true`.
+  final bool autoReturn;
 
   /// Timeout tunggu sync per pengecekan insert.
   final Duration timeout;

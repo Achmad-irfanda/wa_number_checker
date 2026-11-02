@@ -51,6 +51,20 @@ void main() {
       expect(c.autoCleanup, isFalse);
       expect(c.maxStoredContacts, 100);
       expect(c.timeout, const Duration(seconds: 15));
+      expect(c.noticeStyle, WaNoticeStyle.standard);
+      expect(c.returnActionText, 'Kembali ke aplikasi');
+      expect(c.autoReturn, isTrue);
+    });
+
+    test('supports custom notice style', () {
+      const c = WaCheckerConfig(
+        noticeStyle: WaNoticeStyle.custom,
+        returnActionText: 'Balik ke App',
+        autoReturn: false,
+      );
+      expect(c.noticeStyle, WaNoticeStyle.custom);
+      expect(c.returnActionText, 'Balik ke App');
+      expect(c.autoReturn, isFalse);
     });
   });
 

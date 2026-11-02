@@ -47,8 +47,9 @@ class ExampleHome extends StatefulWidget {
 }
 
 class _ExampleHomeState extends State<ExampleHome> {
-  late final WaNumberChecker checker;
+  late WaNumberChecker checker;
   final phoneCtrl = TextEditingController(text: '08');
+  WaNoticeStyle noticeStyle = WaNoticeStyle.standard;
 
   /// Result of the last check, or null if the number changed since then.
   WaCheckResult? result;
@@ -62,22 +63,16 @@ class _ExampleHomeState extends State<ExampleHome> {
   @override
   void initState() {
     super.initState();
-    // Create one checker and reuse it. The defaults are used here; pass a
-    // `WaCheckerConfig` to change them, for example:
-    //
-    //   WaNumberChecker(
-    //     config: const WaCheckerConfig(
-    //       // How long to wait after WhatsApp was opened (default 15s).
-    //       openWhatsAppTimeout: Duration(seconds: 15),
-    //       // How many checked numbers to keep cached (default 100).
-    //       maxStoredContacts: 100,
-    //       // Notification texts (defaults are in Indonesian).
-    //       progressNoticeTitle: 'Verifying WhatsApp number…',
-    //       returnNoticeTitle: 'Verification finished',
-    //       notRegisteredNoticeTitle: 'Not a WhatsApp number',
-    //     ),
-    //   );
-    checker = WaNumberChecker();
+    _initChecker();
+  }
+
+  void _initChecker() {
+    checker = WaNumberChecker(
+      config: WaCheckerConfig(
+        noticeStyle: noticeStyle,
+        returnActionText: 'back to client app',
+      ),
+    );
   }
 
   @override
@@ -215,7 +210,33 @@ class _ExampleHomeState extends State<ExampleHome> {
           ),
           const SizedBox(height: 8),
           Text(label(result)),
-          SizedBox(height: 10),
+          const SizedBox(height: 12),
+          const Text(
+            'Notification Style:',
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 6),
+          SegmentedButton<WaNoticeStyle>(
+            segments: const [
+              ButtonSegment(
+                value: WaNoticeStyle.standard,
+                label: Text('Style A (Standard)'),
+              ),
+              ButtonSegment(
+                value: WaNoticeStyle.custom,
+                label: Text('Style B (Custom Layout)'),
+              ),
+            ],
+            selected: {noticeStyle},
+            onSelectionChanged: (val) {
+              setState(() {
+                noticeStyle = val.first;
+                checker.dispose();
+                _initChecker();
+              });
+            },
+          ),
+          const SizedBox(height: 14),
           Center(
             child: Wrap(
               spacing: 8,

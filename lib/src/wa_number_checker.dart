@@ -46,6 +46,9 @@ class WaNumberChecker {
   /// Menutup notifikasi "kembali ke app" saat user sudah kembali.
   AppLifecycleListener? _lifecycle;
 
+  Future<WaCheckResult>? _ongoingVerify;
+  String? _ongoingPhone;
+
   /// Lapis simpel (80% consumer): check-then-insert otomatis.
   ///
   /// WA di background tidak mengecek kontak baru, jadi nomor yang belum
@@ -59,8 +62,37 @@ class WaNumberChecker {
     bool? cleanup,
     Future<bool> Function()? confirmOpenWhatsApp,
   }) async {
-    final myGen = ++_generation;
     final normalized = normalizeWaPhone(phone);
+    if (_ongoingVerify != null && _ongoingPhone == normalized) {
+      return _ongoingVerify!;
+    }
+    final future = _verifyInternal(
+      phone,
+      normalized: normalized,
+      timeout: timeout,
+      cleanup: cleanup,
+      confirmOpenWhatsApp: confirmOpenWhatsApp,
+    );
+    _ongoingPhone = normalized;
+    _ongoingVerify = future;
+    try {
+      return await future;
+    } finally {
+      if (_ongoingPhone == normalized) {
+        _ongoingPhone = null;
+        _ongoingVerify = null;
+      }
+    }
+  }
+
+  Future<WaCheckResult> _verifyInternal(
+    String phone, {
+    required String normalized,
+    Duration? timeout,
+    bool? cleanup,
+    Future<bool> Function()? confirmOpenWhatsApp,
+  }) async {
+    final myGen = ++_generation;
     final clean = cleanup ?? config.autoCleanup;
 
     bool cancelled() => myGen != _generation || _disposed;
@@ -322,7 +354,17 @@ class WaNumberChecker {
       if (r.status != WaCheckStatus.cancelled && _lastContactId == contactId) {
         _lastContactId = null;
       }
-      if (waOpened) await _showReturnNotice(r.status);
+      if (waOpened) {
+        var returned = false;
+        if (config.autoReturn && r.status != WaCheckStatus.cancelled) {
+          returned = await _bridge.bringAppToForeground();
+        }
+        if (returned) {
+          await _bridge.cancelReturnNotice();
+        } else {
+          await _showReturnNotice(r.status);
+        }
+      }
       completer.complete(r);
     }
 
@@ -375,12 +417,30 @@ class WaNumberChecker {
       if (waOpened) {
         hints.add('waOpened');
         _lifecycle ??= AppLifecycleListener(
-          onResume: _bridge.cancelReturnNotice,
+          onResume: () {
+            // Hanya bersihkan notifikasi bila verifikasi sudah selesai.
+            // Jika proses masih berjalan dan user kembali ke app,
+            // notifikasi progress tetap berjalan namun tombol "kembali" disembunyikan.
+            if (_ongoingVerify == null) {
+              _bridge.cancelReturnNotice();
+            } else {
+              _bridge.setNoticeActionVisible(false);
+            }
+          },
+          onPause: () {
+            if (_ongoingVerify != null) {
+              // User berpindah kembali ke WhatsApp:
+              // munculkan kembali tombol "kembali ke aplikasi".
+              _bridge.setNoticeActionVisible(true);
+            }
+          },
         );
         await _bridge.showProgressNotice(
           config.progressNoticeTitle,
           config.progressNoticeBody,
           limit,
+          actionText: config.returnActionText,
+          style: config.noticeStyle.name,
         );
       }
     }
@@ -427,7 +487,6 @@ class WaNumberChecker {
   Future<void> _showReturnNotice(WaCheckStatus status) async {
     final state = WidgetsBinding.instance.lifecycleState;
     if (status == WaCheckStatus.cancelled ||
-        state == null ||
         state == AppLifecycleState.resumed) {
       // Tidak ada yang perlu diberitahukan — tutup notifikasi progress.
       await _bridge.cancelReturnNotice();
@@ -437,6 +496,8 @@ class WaNumberChecker {
     await _bridge.showReturnNotice(
       invalid ? config.notRegisteredNoticeTitle : config.returnNoticeTitle,
       invalid ? config.notRegisteredNoticeBody : config.returnNoticeBody,
+      actionText: config.returnActionText,
+      style: config.noticeStyle.name,
     );
   }
 

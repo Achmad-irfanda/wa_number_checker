@@ -12,6 +12,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.database.ContentObserver
+import android.graphics.drawable.Icon
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
@@ -21,6 +22,8 @@ import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
 import android.provider.ContactsContract
+import android.view.View
+import android.widget.RemoteViews
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
@@ -135,18 +138,30 @@ class WaNumberCheckerPlugin :
             "showReturnNotice" -> {
                 val title = call.argument<String>("title") ?: ""
                 val body = call.argument<String>("body") ?: ""
-                result.success(showReturnNotice(title, body))
+                val actionText = call.argument<String>("actionText") ?: "Kembali ke aplikasi"
+                val style = call.argument<String>("style") ?: "standard"
+                result.success(showReturnNotice(title, body, actionText, style))
             }
             "showProgressNotice" -> {
                 val title = call.argument<String>("title") ?: ""
                 val body = call.argument<String>("body") ?: ""
                 val durationMs = (call.argument<Number>("durationMs") ?: 0).toLong()
-                result.success(showProgressNotice(title, body, durationMs))
+                val actionText = call.argument<String>("actionText") ?: "Kembali ke aplikasi"
+                val style = call.argument<String>("style") ?: "standard"
+                result.success(showProgressNotice(title, body, durationMs, actionText, style))
             }
             "cancelReturnNotice" -> {
                 stopProgress()
                 notifications().cancel(RETURN_NOTICE_ID)
                 result.success(true)
+            }
+            "setNoticeActionVisible" -> {
+                val visible = call.argument<Boolean>("visible") ?: true
+                setNoticeActionVisible(visible)
+                result.success(true)
+            }
+            "bringAppToForeground" -> {
+                result.success(bringAppToForeground())
             }
             else -> result.notImplemented()
         }
@@ -214,71 +229,319 @@ class WaNumberCheckerPlugin :
         return true
     }
 
+    private var isActionVisible: Boolean = true
+    private var currentBigViews: RemoteViews? = null
+    private var currentNoticeBuilder: Notification.Builder? = null
+    private var lastProgressTitle: String = ""
+    private var lastProgressBody: String = ""
+    private var lastProgressActionText: String = "Kembali ke aplikasi"
+    private var lastProgressDurationMs: Long = 0
+    private var lastProgressStyle: String = "standard"
+    private var lastStartElapsed: Long = 0
+
     private fun notifications(): NotificationManager =
         appContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
     private fun stopProgress() {
         progressTick?.let { main.removeCallbacks(it) }
         progressTick = null
+        currentBigViews = null
+        currentNoticeBuilder = null
+        isActionVisible = true
     }
 
-    /** Kerangka notifikasi yang membawa user kembali ke app consumer saat diketuk. */
-    private fun noticeBuilder(title: String, body: String): Notification.Builder? {
+    /**
+     * Tampilkan atau sembunyikan tombol "kembali ke aplikasi" secara dinamis.
+     * Tombol hanya ditampilkan saat user berada di luar app (mis. di WhatsApp).
+     */
+    private fun setNoticeActionVisible(visible: Boolean) {
+        if (isActionVisible == visible) return
+        isActionVisible = visible
+        if (progressTick != null) {
+            updateProgressNotification()
+        }
+    }
+
+    private fun updateProgressNotification() {
         val nm = notifications()
-        if (!nm.areNotificationsEnabled()) return null
-        val launch = appContext.packageManager.getLaunchIntentForPackage(appContext.packageName)
-            ?: return null
-        val tap = PendingIntent.getActivity(
+        if (!nm.areNotificationsEnabled()) return
+        val total = lastProgressDurationMs.coerceAtLeast(1)
+        val elapsed = SystemClock.elapsedRealtime() - lastStartElapsed
+        val progress = (elapsed * 100 / total).toInt().coerceIn(0, 100)
+
+        if (lastProgressStyle == "custom" && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            val bigViews = currentBigViews ?: return
+            val builder = currentNoticeBuilder ?: return
+
+            bigViews.setViewVisibility(
+                R.id.wa_notice_btn_action,
+                if (isActionVisible) View.VISIBLE else View.GONE,
+            )
+            builder.setCustomContentView(bigViews)
+            builder.setCustomBigContentView(bigViews)
+            builder.setCustomHeadsUpContentView(bigViews)
+            nm.notify(RETURN_NOTICE_ID, builder.build())
+        } else {
+            val tap = getReturnPendingIntent() ?: return
+            val builder = baseBuilder() ?: return
+            builder.setOngoing(true).setOnlyAlertOnce(true)
+            builder.setContentTitle(lastProgressTitle)
+            builder.setContentText(lastProgressBody)
+            builder.setStyle(Notification.BigTextStyle().bigText(lastProgressBody))
+            builder.setUsesChronometer(true)
+            builder.setWhen(System.currentTimeMillis() - elapsed)
+            builder.setProgress(100, progress, false)
+
+            if (isActionVisible) {
+                val icon = Icon.createWithResource(appContext, appContext.applicationInfo.icon)
+                val action = Notification.Action.Builder(
+                    icon,
+                    lastProgressActionText,
+                    tap,
+                ).build()
+                builder.addAction(action)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                builder.setTimeoutAfter((total - elapsed).coerceAtLeast(0) + 5_000)
+            }
+            currentNoticeBuilder = builder
+            nm.notify(RETURN_NOTICE_ID, builder.build())
+        }
+    }
+
+    private fun getReturnPendingIntent(): PendingIntent? {
+        val launch = appContext.packageManager.getLaunchIntentForPackage(appContext.packageName)?.apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        } ?: return null
+        return PendingIntent.getActivity(
             appContext,
             0,
             launch,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        val builder =
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                nm.createNotificationChannel(
-                    NotificationChannel(
-                        RETURN_CHANNEL_ID,
-                        "Verifikasi WhatsApp",
-                        NotificationManager.IMPORTANCE_HIGH,
-                    ),
-                )
-                Notification.Builder(appContext, RETURN_CHANNEL_ID)
-            } else {
-                @Suppress("DEPRECATION")
-                Notification.Builder(appContext).setPriority(Notification.PRIORITY_HIGH)
-            }
-        return builder
-            .setSmallIcon(appContext.applicationInfo.icon)
-            .setContentTitle(title)
-            .setContentText(body)
-            .setContentIntent(tap)
-    }
-
-    /** Notifikasi hasil ("ketuk untuk kembali"). False jika notifikasi diblokir. */
-    private fun showReturnNotice(title: String, body: String): Boolean {
-        stopProgress()
-        val builder = noticeBuilder(title, body) ?: return false
-        notifications().notify(RETURN_NOTICE_ID, builder.setAutoCancel(true).build())
-        return true
     }
 
     /**
-     * Notifikasi progress selama menunggu WA: bar terisi sampai [durationMs]
-     * (batas timeout), lalu digantikan notifikasi hasil dengan ID yang sama.
+     * Kerangka dasar notifikasi (channel IMPORTANCE_HIGH untuk heads-up banner
+     * + tap intent kembali ke app consumer).
      */
-    private fun showProgressNotice(title: String, body: String, durationMs: Long): Boolean {
+    private fun baseBuilder(): Notification.Builder? {
+        val nm = notifications()
+        if (!nm.areNotificationsEnabled()) return null
+        val tap = getReturnPendingIntent() ?: return null
+
+        val builder =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val channel = NotificationChannel(
+                    RETURN_CHANNEL_ID,
+                    "Verifikasi WhatsApp",
+                    NotificationManager.IMPORTANCE_HIGH,
+                ).apply {
+                    description = "Status verifikasi nomor WhatsApp"
+                    enableVibration(true)
+                }
+                nm.createNotificationChannel(channel)
+                Notification.Builder(appContext, RETURN_CHANNEL_ID)
+            } else {
+                @Suppress("DEPRECATION")
+                Notification.Builder(appContext)
+            }
+        @Suppress("DEPRECATION")
+        builder.setPriority(Notification.PRIORITY_MAX)
+        builder.setCategory(Notification.CATEGORY_CALL)
+        builder.setFullScreenIntent(tap, false)
+        return builder
+            .setSmallIcon(appContext.applicationInfo.icon)
+            .setContentIntent(tap)
+    }
+
+    /**
+     * Bawa app consumer kembali ke foreground saat verifikasi selesai.
+     */
+    private fun bringAppToForeground(): Boolean {
         stopProgress()
-        val builder = noticeBuilder(title, body) ?: return false
-        builder.setOngoing(true).setOnlyAlertOnce(true)
+        notifications().cancel(RETURN_NOTICE_ID)
+        val pm = appContext.packageManager
+        val launch = pm.getLaunchIntentForPackage(appContext.packageName)?.apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+        } ?: return false
+        return try {
+            appContext.startActivity(launch)
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Notifikasi hasil ("ketuk untuk kembali" / "kembali ke aplikasi").
+     * Mendukung [style]:
+     * - "standard": Pendekatan A (BigTextStyle + Action Button).
+     * - "custom": Pendekatan B (Custom RemoteViews layout + Action Button).
+     */
+    private fun showReturnNotice(
+        title: String,
+        body: String,
+        actionText: String = "Kembali ke aplikasi",
+        style: String = "standard",
+    ): Boolean {
+        stopProgress()
+        val builder = baseBuilder() ?: return false
+        val tap = getReturnPendingIntent() ?: return false
+        builder.setAutoCancel(true)
+
+        if (style == "custom" && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            try {
+                val remoteViews = RemoteViews(appContext.packageName, R.layout.wa_notification_custom)
+                remoteViews.setTextViewText(R.id.wa_notice_title, title)
+                remoteViews.setTextViewText(R.id.wa_notice_body, body)
+                remoteViews.setTextViewText(R.id.wa_notice_btn_action, actionText)
+                remoteViews.setViewVisibility(R.id.wa_notice_chronometer, View.GONE)
+                remoteViews.setViewVisibility(R.id.wa_notice_progress, View.GONE)
+                remoteViews.setOnClickPendingIntent(R.id.wa_notice_btn_action, tap)
+                remoteViews.setOnClickPendingIntent(R.id.wa_notice_container, tap)
+
+                builder.setStyle(Notification.DecoratedCustomViewStyle())
+                builder.setCustomContentView(remoteViews)
+                builder.setCustomBigContentView(remoteViews)
+                builder.setCustomHeadsUpContentView(remoteViews)
+            } catch (_: Exception) {
+                // Fallback to standard style if RemoteViews fails
+                applyStandardReturnStyle(builder, title, body, actionText, tap)
+            }
+        } else {
+            applyStandardReturnStyle(builder, title, body, actionText, tap)
+        }
+
+        notifications().notify(RETURN_NOTICE_ID, builder.build())
+        return true
+    }
+
+    private fun applyStandardReturnStyle(
+        builder: Notification.Builder,
+        title: String,
+        body: String,
+        actionText: String,
+        tap: PendingIntent,
+    ) {
+        builder.setContentTitle(title)
+        builder.setContentText(body)
+        builder.setStyle(Notification.BigTextStyle().bigText(body))
+        val icon = Icon.createWithResource(appContext, appContext.applicationInfo.icon)
+        val action = Notification.Action.Builder(
+            icon,
+            actionText,
+            tap,
+        ).build()
+        builder.addAction(action)
+    }
+
+    /**
+     * Notifikasi progress selama menunggu WA:
+     * - "standard": Pendekatan A (BigTextStyle, real-time Chronometer timer,
+     *   progress bar, dan action button [Kembali ke aplikasi]).
+     * - "custom": Pendekatan B (Custom RemoteViews layout dengan layout lebih
+     *   luas, title, timer, body, progress bar, dan button kembali).
+     */
+    private fun showProgressNotice(
+        title: String,
+        body: String,
+        durationMs: Long,
+        actionText: String = "Kembali ke aplikasi",
+        style: String = "standard",
+    ): Boolean {
+        stopProgress()
+        val builder = baseBuilder() ?: return false
+        val tap = getReturnPendingIntent() ?: return false
         val total = durationMs.coerceAtLeast(1)
-        val start = SystemClock.elapsedRealtime()
+        val startElapsed = SystemClock.elapsedRealtime()
+
+        lastProgressTitle = title
+        lastProgressBody = body
+        lastProgressActionText = actionText
+        lastProgressDurationMs = durationMs
+        lastProgressStyle = style
+        lastStartElapsed = startElapsed
+        isActionVisible = true
+
+        builder.setOngoing(true).setOnlyAlertOnce(true)
+
+        if (style == "custom" && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            try {
+                val bigViews = RemoteViews(appContext.packageName, R.layout.wa_notification_custom)
+                bigViews.setTextViewText(R.id.wa_notice_title, title)
+                bigViews.setTextViewText(R.id.wa_notice_body, body)
+                bigViews.setTextViewText(R.id.wa_notice_btn_action, actionText)
+                bigViews.setChronometer(R.id.wa_notice_chronometer, startElapsed, null, true)
+                bigViews.setViewVisibility(
+                    R.id.wa_notice_btn_action,
+                    if (isActionVisible) View.VISIBLE else View.GONE,
+                )
+                bigViews.setOnClickPendingIntent(R.id.wa_notice_btn_action, tap)
+                bigViews.setOnClickPendingIntent(R.id.wa_notice_container, tap)
+
+                builder.setStyle(Notification.DecoratedCustomViewStyle())
+                builder.setCustomContentView(bigViews)
+                builder.setCustomBigContentView(bigViews)
+                builder.setCustomHeadsUpContentView(bigViews)
+
+                currentBigViews = bigViews
+                currentNoticeBuilder = builder
+
+                val tick = object : Runnable {
+                    override fun run() {
+                        val elapsed = SystemClock.elapsedRealtime() - startElapsed
+                        val progress = (elapsed * 100 / total).toInt().coerceIn(0, 100)
+                        bigViews.setProgressBar(R.id.wa_notice_progress, 100, progress, false)
+                        bigViews.setViewVisibility(
+                            R.id.wa_notice_btn_action,
+                            if (isActionVisible) View.VISIBLE else View.GONE,
+                        )
+                        builder.setCustomContentView(bigViews)
+                        builder.setCustomBigContentView(bigViews)
+                        builder.setCustomHeadsUpContentView(bigViews)
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            builder.setTimeoutAfter((total - elapsed).coerceAtLeast(0) + 5_000)
+                        }
+                        notifications().notify(RETURN_NOTICE_ID, builder.build())
+                        if (elapsed < total) main.postDelayed(this, 500)
+                    }
+                }
+                progressTick = tick
+                tick.run()
+                return true
+            } catch (_: Exception) {
+                // Fallback to standard
+            }
+        }
+
+        // Standard Rich Notification (Pendekatan A)
+        builder.setContentTitle(title)
+        builder.setContentText(body)
+        builder.setStyle(Notification.BigTextStyle().bigText(body))
+        builder.setUsesChronometer(true)
+        builder.setWhen(System.currentTimeMillis())
+
+        if (isActionVisible) {
+            val icon = Icon.createWithResource(appContext, appContext.applicationInfo.icon)
+            val action = Notification.Action.Builder(
+                icon,
+                actionText,
+                tap,
+            ).build()
+            builder.addAction(action)
+        }
+        currentNoticeBuilder = builder
+
         val tick = object : Runnable {
             override fun run() {
-                val elapsed = SystemClock.elapsedRealtime() - start
-                builder.setProgress(100, (elapsed * 100 / total).toInt().coerceIn(0, 100), false)
+                val elapsed = SystemClock.elapsedRealtime() - startElapsed
+                val progress = (elapsed * 100 / total).toInt().coerceIn(0, 100)
+                builder.setProgress(100, progress, false)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    // Bila proses app mati di tengah jalan, sistem yang menutupnya.
                     builder.setTimeoutAfter((total - elapsed).coerceAtLeast(0) + 5_000)
                 }
                 notifications().notify(RETURN_NOTICE_ID, builder.build())
