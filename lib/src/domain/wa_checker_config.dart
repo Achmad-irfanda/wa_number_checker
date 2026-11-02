@@ -22,14 +22,17 @@ class WaCheckerConfig {
     this.maxStoredContacts = 100,
     this.minInsertInterval = const Duration(seconds: 10),
     this.contactTag = 'WA_CHECK',
-    this.openWhatsAppTimeout = const Duration(seconds: 15),
+    this.openWhatsAppTimeout = const Duration(seconds: 8),
     this.noticeStyle = WaNoticeStyle.standard,
     this.returnActionText = 'Kembali ke aplikasi',
     this.autoReturn = true,
+    this.autoReturnDelay = const Duration(milliseconds: 4500),
     this.progressNoticeTitle = 'Memverifikasi nomor WhatsApp…',
     this.progressNoticeBody = 'Mohon tunggu sebentar',
-    this.returnNoticeTitle = 'Verifikasi selesai',
+    this.returnNoticeTitle = 'Nomor WhatsApp terdaftar',
     this.returnNoticeBody = 'Ketuk untuk kembali ke aplikasi',
+    this.pendingNoticeTitle = 'Nomor WhatsApp belum bisa dipastikan',
+    this.pendingNoticeBody = 'Ketuk untuk kembali ke aplikasi',
     this.notRegisteredNoticeTitle = 'Nomor WhatsApp tidak valid',
     this.notRegisteredNoticeBody =
         'Nomor tidak terdaftar di WhatsApp. Ketuk untuk kembali ke aplikasi',
@@ -42,9 +45,14 @@ class WaCheckerConfig {
   /// Teks tombol aksi pada notifikasi untuk kembali ke aplikasi client.
   final String returnActionText;
 
-  /// Otomatis membawa user kembali ke aplikasi client begitu verifikasi selesai.
-  /// Default: `true`.
+  /// Coba bawa user kembali ke aplikasi client bila tombol di notifikasi
+  /// hasil belum ditekan setelah [autoReturnDelay]. Android bisa memblokir
+  /// ini saat app di background; notifikasi hasil tetap ada sebagai jalan
+  /// kembali. Default: `true`.
   final bool autoReturn;
+
+  /// Jeda antara notifikasi hasil dan percobaan [autoReturn].
+  final Duration autoReturnDelay;
 
   /// Timeout tunggu sync per pengecekan insert.
   final Duration timeout;
@@ -58,15 +66,16 @@ class WaCheckerConfig {
   /// seluruh isinya dibuang sebelum insert berikutnya.
   final int maxStoredContacts;
 
-  /// Jeda minimum antar insert (anti enumerasi massal + hemat resource).
+  /// Jeda minimum antar insert nomor berbeda (anti enumerasi massal + hemat
+  /// resource). Mengulang nomor yang sama tidak dibatasi.
   final Duration minInsertInterval;
 
   /// Prefix nama kontak sementara (mudah dikenali bila tertahan).
   final String contactTag;
 
-  /// Timeout saat WA dibuka untuk verifikasi (`confirmOpenWhatsApp`).
-  /// Lebih panjang dari [timeout]: WA yang mati butuh ~10 detik. Bila habis
-  /// padahal WA sudah terbuka, hasilnya `notRegistered` (bukan `pending`).
+  /// Batas tunggu saat WA dibuka untuk verifikasi (`confirmOpenWhatsApp`).
+  /// Bila habis hasilnya `pending`: WA yang start dari mati butuh ~10 detik,
+  /// jadi nomor yang belum muncul belum tentu tidak terdaftar.
   final Duration openWhatsAppTimeout;
 
   /// Judul notifikasi progress selama menunggu WA.
@@ -75,15 +84,25 @@ class WaCheckerConfig {
   /// Isi notifikasi progress selama menunggu WA.
   final String progressNoticeBody;
 
-  /// Judul notifikasi "kembali ke app" setelah WA dibuka.
+  /// Judul notifikasi saat nomor terdeteksi terdaftar.
   final String returnNoticeTitle;
 
-  /// Isi notifikasi "kembali ke app" setelah WA dibuka.
+  /// Isi notifikasi saat nomor terdeteksi terdaftar.
   final String returnNoticeBody;
 
-  /// Judul notifikasi saat nomor tidak terdeteksi walau WA sudah dibuka.
+  /// Judul notifikasi saat nomor belum muncul sampai [openWhatsAppTimeout].
+  final String pendingNoticeTitle;
+
+  /// Isi notifikasi saat nomor belum muncul sampai [openWhatsAppTimeout].
+  final String pendingNoticeBody;
+
+  @Deprecated(
+    'Tidak dipakai lagi: timeout kini `pending`. Pakai pendingNoticeTitle.',
+  )
   final String notRegisteredNoticeTitle;
 
-  /// Isi notifikasi saat nomor tidak terdeteksi walau WA sudah dibuka.
+  @Deprecated(
+    'Tidak dipakai lagi: timeout kini `pending`. Pakai pendingNoticeBody.',
+  )
   final String notRegisteredNoticeBody;
 }

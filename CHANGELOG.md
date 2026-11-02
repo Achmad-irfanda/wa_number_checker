@@ -1,3 +1,40 @@
+## 0.3.0
+
+**Behavior changes**
+
+* A timeout after WhatsApp was opened now returns `pending` instead of
+  `notRegistered`, because a cold start of WhatsApp can exceed the wait.
+  `verify()` no longer returns `notRegistered`.
+* `openWhatsAppTimeout` now defaults to 8s (was 15s).
+* `autoReturn` now waits `autoReturnDelay` (4.5s) after the result
+  notification instead of returning at once, and the notification stays if
+  Android blocks the return.
+* Checking the same number again is no longer rate-limited, so a `pending`
+  result can be retried right away.
+* The default `returnNoticeTitle` now states the result.
+
+**Added**
+
+* `WaCheckerConfig.autoReturnDelay`, `pendingNoticeTitle` and
+  `pendingNoticeBody`.
+* `verify(useOverlay: true)` and `checkWithInsert(useOverlay: true)`: show the
+  status in a card on top of WhatsApp. The app must declare
+  `SYSTEM_ALERT_WINDOW` itself; the package does not. Uses notifications when
+  the permission is missing.
+* `canDrawOverlays()` and `openOverlaySettings()`.
+
+**Deprecated**
+
+* `notRegisteredNoticeTitle` and `notRegisteredNoticeBody` are no longer used.
+
+**Fixed**
+
+* The result is posted as a new heads-up after the progress banner has gone.
+* A return blocked by Android left the user without any notification.
+* The return button came back on the `standard` notice after being hidden.
+* A result found while WhatsApp was opening left the progress notification on
+  screen.
+
 ## 0.2.1
 
 * Widens `permission_handler` to `>=12.0.1 <14.0.0` (was `^11.3.1`).

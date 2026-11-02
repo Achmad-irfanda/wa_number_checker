@@ -54,6 +54,10 @@ void main() {
       expect(c.noticeStyle, WaNoticeStyle.standard);
       expect(c.returnActionText, 'Kembali ke aplikasi');
       expect(c.autoReturn, isTrue);
+      expect(c.autoReturnDelay, const Duration(milliseconds: 4500));
+      expect(c.openWhatsAppTimeout, const Duration(seconds: 8));
+      expect(c.returnNoticeTitle, 'Nomor WhatsApp terdaftar');
+      expect(c.pendingNoticeTitle, 'Nomor WhatsApp belum bisa dipastikan');
     });
 
     test('supports custom notice style', () {

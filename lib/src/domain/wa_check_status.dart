@@ -2,16 +2,18 @@
 ///
 /// `registered` berarti nomor terdeteksi oleh minimal satu app
 /// (WA biasa dan/atau WA Business). Semua nilai selain itu berarti
-/// **tidak terbukti terdaftar** — bedakan `notRegistered` (negatif
-/// terverifikasi) dari `uncertain` (pending/offline/dsb, netral).
+/// **tidak terbukti terdaftar** — `notRegistered` hanya berarti belum
+/// dikenal device, `uncertain` (pending/offline/dsb) netral.
 enum WaCheckStatus {
   /// Nomor terdaftar (via WA dan/atau WA Business).
   registered,
 
-  /// Ada WA aktif yang sync, nomor tidak muncul: negatif terverifikasi.
+  /// Hasil `checkExisting()`: nomor belum dikenal WA di device ini. WA belum
+  /// tentu sudah mengeceknya; `verify()` tidak mengembalikan status ini.
   notRegistered,
 
-  /// Timeout tanpa kesimpulan (mis. sync tertunda). Netral, boleh retry.
+  /// Timeout tanpa kesimpulan, dengan atau tanpa WA dibuka (hint `waOpened`).
+  /// Netral, boleh retry.
   pending,
 
   /// Tidak ada internet saat pengecekan. Pengecekan tidak dijalankan.

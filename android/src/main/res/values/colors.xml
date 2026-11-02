@@ -2,4 +2,5 @@
 <resources>
     <color name="wa_notice_text_primary">#DE000000</color>
     <color name="wa_notice_text_secondary">#8A000000</color>
+    <color name="wa_overlay_bg">#FFFFFF</color>
 </resources>

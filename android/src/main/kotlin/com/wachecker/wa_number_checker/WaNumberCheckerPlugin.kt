@@ -2,6 +2,7 @@ package com.wachecker.wa_number_checker
 
 import android.accounts.Account
 import android.accounts.AccountManager
+import android.animation.ObjectAnimator
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -12,6 +13,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.database.ContentObserver
+import android.graphics.PixelFormat
 import android.graphics.drawable.Icon
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
@@ -22,8 +24,16 @@ import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
 import android.provider.ContactsContract
+import android.provider.Settings
+import android.view.ContextThemeWrapper
+import android.view.Gravity
+import android.view.LayoutInflater
 import android.view.View
+import android.view.WindowManager
+import android.widget.Button
+import android.widget.ProgressBar
 import android.widget.RemoteViews
+import android.widget.TextView
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
@@ -52,6 +62,8 @@ class WaNumberCheckerPlugin :
     private var observer: ContentObserver? = null
     private var sink: EventChannel.EventSink? = null
     private var progressTick: Runnable? = null
+    private var overlayView: View? = null
+    private var overlayProgress: ObjectAnimator? = null
 
     companion object {
         const val TEMP_ACCOUNT_TYPE = "com.wa_checker.temp"
@@ -81,6 +93,7 @@ class WaNumberCheckerPlugin :
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         unregisterObserver()
         stopProgress()
+        hideOverlay()
         channel.setMethodCallHandler(null)
         eventChannel?.setStreamHandler(null)
     }
@@ -162,6 +175,23 @@ class WaNumberCheckerPlugin :
             }
             "bringAppToForeground" -> {
                 result.success(bringAppToForeground())
+            }
+            "canDrawOverlays" -> {
+                result.success(Settings.canDrawOverlays(appContext))
+            }
+            "openOverlaySettings" -> {
+                result.success(openOverlaySettings())
+            }
+            "showOverlay" -> {
+                val title = call.argument<String>("title") ?: ""
+                val body = call.argument<String>("body") ?: ""
+                val durationMs = (call.argument<Number>("durationMs") ?: 0).toLong()
+                val actionText = call.argument<String>("actionText") ?: "Kembali ke aplikasi"
+                result.success(showOverlay(title, body, durationMs, actionText))
+            }
+            "hideOverlay" -> {
+                hideOverlay()
+                result.success(true)
             }
             else -> result.notImplemented()
         }
@@ -357,10 +387,11 @@ class WaNumberCheckerPlugin :
 
     /**
      * Bawa app consumer kembali ke foreground saat verifikasi selesai.
+     * Notifikasi hasil tidak ditutup di sini: `startActivity` bisa diblokir
+     * Android tanpa error, dan notifikasi itu satu-satunya jalan kembali.
      */
     private fun bringAppToForeground(): Boolean {
         stopProgress()
-        notifications().cancel(RETURN_NOTICE_ID)
         val pm = appContext.packageManager
         val launch = pm.getLaunchIntentForPackage(appContext.packageName)?.apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or
@@ -377,6 +408,90 @@ class WaNumberCheckerPlugin :
     }
 
     /**
+     * Izin overlay tidak punya dialog runtime: user mengaktifkannya sendiri
+     * di Settings. Permission-nya dideklarasikan app consumer, bukan library.
+     */
+    private fun openOverlaySettings(): Boolean {
+        val intent = Intent(
+            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+            Uri.parse("package:${appContext.packageName}"),
+        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return try {
+            appContext.startActivity(intent)
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun windowManager(): WindowManager =
+        appContext.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+
+    /**
+     * Kartu status di atas WA. Dipanggil ulang untuk mengganti isi kartu yang
+     * sudah tampil; [durationMs] 0 berarti tanpa progress (kartu hasil).
+     */
+    private fun showOverlay(
+        title: String,
+        body: String,
+        durationMs: Long,
+        actionText: String,
+    ): Boolean {
+        if (!Settings.canDrawOverlays(appContext)) return false
+        return try {
+            val view = overlayView ?: createOverlay()
+            view.findViewById<TextView>(R.id.wa_overlay_title).text = title
+            view.findViewById<TextView>(R.id.wa_overlay_body).text = body
+            view.findViewById<Button>(R.id.wa_overlay_btn_action).text = actionText
+            val progress = view.findViewById<ProgressBar>(R.id.wa_overlay_progress)
+            overlayProgress?.cancel()
+            overlayProgress = null
+            progress.visibility = if (durationMs > 0) View.VISIBLE else View.GONE
+            if (durationMs > 0) {
+                overlayProgress = ObjectAnimator.ofInt(progress, "progress", 0, 100).apply {
+                    duration = durationMs
+                    start()
+                }
+            }
+            true
+        } catch (_: Exception) {
+            hideOverlay()
+            false
+        }
+    }
+
+    private fun createOverlay(): View {
+        val themed = ContextThemeWrapper(appContext, android.R.style.Theme_Material_Light)
+        val view = LayoutInflater.from(themed).inflate(R.layout.wa_overlay_card, null)
+        // Kartu ditutup `onResume` di Dart, jadi tetap ada kalau kembali gagal.
+        view.findViewById<Button>(R.id.wa_overlay_btn_action)
+            .setOnClickListener { bringAppToForeground() }
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            PixelFormat.TRANSLUCENT,
+        ).apply { gravity = Gravity.TOP }
+        windowManager().addView(view, params)
+        overlayView = view
+        return view
+    }
+
+    private fun hideOverlay() {
+        overlayProgress?.cancel()
+        overlayProgress = null
+        overlayView?.let {
+            try {
+                windowManager().removeView(it)
+            } catch (_: Exception) {
+            }
+        }
+        overlayView = null
+    }
+
+    /**
      * Notifikasi hasil ("ketuk untuk kembali" / "kembali ke aplikasi").
      * Mendukung [style]:
      * - "standard": Pendekatan A (BigTextStyle + Action Button).
@@ -389,6 +504,9 @@ class WaNumberCheckerPlugin :
         style: String = "standard",
     ): Boolean {
         stopProgress()
+        // Dibatalkan dulu: update di ID yang sama tidak selalu memunculkan
+        // heads-up baru bila banner progress sudah turun ke shade.
+        notifications().cancel(RETURN_NOTICE_ID)
         val builder = baseBuilder() ?: return false
         val tap = getReturnPendingIntent() ?: return false
         builder.setAutoCancel(true)
@@ -540,11 +658,13 @@ class WaNumberCheckerPlugin :
             override fun run() {
                 val elapsed = SystemClock.elapsedRealtime() - startElapsed
                 val progress = (elapsed * 100 / total).toInt().coerceIn(0, 100)
-                builder.setProgress(100, progress, false)
+                // setNoticeActionVisible membuat builder baru; pakai yang terkini.
+                val current = currentNoticeBuilder ?: builder
+                current.setProgress(100, progress, false)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    builder.setTimeoutAfter((total - elapsed).coerceAtLeast(0) + 5_000)
+                    current.setTimeoutAfter((total - elapsed).coerceAtLeast(0) + 5_000)
                 }
-                notifications().notify(RETURN_NOTICE_ID, builder.build())
+                notifications().notify(RETURN_NOTICE_ID, current.build())
                 if (elapsed < total) main.postDelayed(this, 500)
             }
         }

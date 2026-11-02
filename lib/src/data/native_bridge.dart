@@ -197,7 +197,57 @@ class NativeBridge {
   /// Tampilkan atau sembunyikan tombol aksi "kembali ke aplikasi" secara dinamis.
   Future<void> setNoticeActionVisible(bool visible) async {
     try {
-      await _methods.invokeMethod('setNoticeActionVisible', {'visible': visible});
+      await _methods.invokeMethod('setNoticeActionVisible', {
+        'visible': visible,
+      });
+    } catch (_) {}
+  }
+
+  /// True bila user sudah mengizinkan app tampil di atas app lain.
+  Future<bool> canDrawOverlays() async {
+    if (!isSupported) return false;
+    try {
+      return await _methods.invokeMethod<bool>('canDrawOverlays') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Buka layar Settings tempat user mengaktifkan izin overlay.
+  Future<bool> openOverlaySettings() async {
+    if (!isSupported) return false;
+    try {
+      return await _methods.invokeMethod<bool>('openOverlaySettings') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Kartu status di atas WA; bar terisi sampai [duration], [Duration.zero]
+  /// berarti tanpa progress. False jika izin belum ada.
+  Future<bool> showOverlay(
+    String title,
+    String body,
+    Duration duration, {
+    String actionText = 'Kembali ke aplikasi',
+  }) async {
+    try {
+      return await _methods.invokeMethod<bool>('showOverlay', {
+            'title': title,
+            'body': body,
+            'durationMs': duration.inMilliseconds,
+            'actionText': actionText,
+          }) ??
+          false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> hideOverlay() async {
+    if (!isSupported) return;
+    try {
+      await _methods.invokeMethod('hideOverlay');
     } catch (_) {}
   }
 

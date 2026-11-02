@@ -28,7 +28,7 @@ if (r.isValid) {
 } else if (r.status.isUncertain) {
   // pending / offline / storageBlocked — neutral, let the user continue
 } else {
-  // notRegistered / waNotInstalled / waNotActive — soft warning
+  // waNotInstalled / waNotActive — soft warning
 }
 ```
 
@@ -49,7 +49,8 @@ if (r.isValid) {
    to the device usually ends as `pending`.
 
 Number normalization (`08xx`/`+62`/`62` → `62xx`) is shared between Dart and
-Kotlin. Inserts are rate-limited (1 per 10s) and always run off the UI thread.
+Kotlin. Inserts of different numbers are rate-limited (1 per 10s) and always
+run off the UI thread.
 
 ## Opening WhatsApp
 
@@ -59,14 +60,25 @@ Pass `confirmOpenWhatsApp` to `verify()` to enable the full flow:
    dialog there and return `true` to continue.
 2. The package inserts the contact, opens WhatsApp and shows a **progress
    notification** ("verifying…") with a bar that fills up to the timeout.
-3. As soon as the answer is known the notification turns into a **result
-   notification**. Tapping it brings the user back to your app. `verify()`
-   completes at the same moment, so the result is ready when they return.
-4. If WhatsApp was open and the number did not show up within
-   `openWhatsAppTimeout` (15s), the result is `notRegistered`.
+   Android hides the banner after a few seconds; the notification stays in the
+   shade.
+3. As soon as the number is detected, or after `openWhatsAppTimeout` (8s), a
+   **result notification** appears as a new heads-up. Its button brings the
+   user back to your app. `verify()` completes at the same moment, so the
+   result is ready when they return.
+4. If the number did not show up in time, the result is `pending`.
 
 Returning `false` from the callback (or not passing it) runs the check without
-opening WhatsApp; a timeout then stays `pending`.
+opening WhatsApp; a timeout is `pending` there too.
+
+If the button is not tapped within `autoReturnDelay` (4.5s), the package tries
+to return to your app by itself. Android can block this while your app is in
+the background; the result notification then stays as the way back. Set
+`autoReturn: false` to turn this off.
+
+WhatsApp can need about 10 seconds on a cold start, so offer a second check on
+`pending`. The number is already stored and WhatsApp is running by then. A
+repeat of the same number is not rate-limited.
 
 The notifications are posted by the package on behalf of your app, so they
 carry your app's name and icon. They need the notification permission on
@@ -74,6 +86,23 @@ Android 13+: call `WaPermissionGate.ensureNotifications()` before the first
 check. If it is denied the check still works, but nothing is shown and the
 user has to switch back manually. If the user is already back in your app when
 the result arrives, no notification is posted.
+
+## Overlay (optional)
+
+`verify(useOverlay: true)` shows the progress and the result in a card on top of
+WhatsApp, with a button back to your app. It replaces the notifications and,
+once granted, lets the automatic return work from the background.
+
+The package does not declare this permission, so add it to your own manifest:
+
+```xml
+<uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+```
+
+There is no runtime dialog. Call `openOverlaySettings()` and let the user allow
+your app in Settings, then read `canDrawOverlays()` when they return. Without
+the permission `verify()` uses notifications. Review this permission for your
+app before release: overlays get extra scrutiny, especially in finance apps.
 
 ## Cached contacts
 
@@ -90,17 +119,21 @@ each check instead.
 WaNumberChecker(
   config: const WaCheckerConfig(
     timeout: Duration(seconds: 15),             // without opening WhatsApp
-    openWhatsAppTimeout: Duration(seconds: 15), // after WhatsApp was opened
+    openWhatsAppTimeout: Duration(seconds: 8),  // after WhatsApp was opened
     maxStoredContacts: 100,
     autoCleanup: false,
     minInsertInterval: Duration(seconds: 10),
+    autoReturn: true,
+    autoReturnDelay: Duration(milliseconds: 4500),
+    noticeStyle: WaNoticeStyle.standard,        // or WaNoticeStyle.custom
     // Notification texts (defaults are in Indonesian).
+    returnActionText: 'Back to the app',
     progressNoticeTitle: 'Verifying WhatsApp number…',
     progressNoticeBody: 'Please wait a moment',
-    returnNoticeTitle: 'Verification finished',
+    returnNoticeTitle: 'WhatsApp number registered',
     returnNoticeBody: 'Tap to return to the app',
-    notRegisteredNoticeTitle: 'Not a WhatsApp number',
-    notRegisteredNoticeBody: 'Tap to return to the app',
+    pendingNoticeTitle: 'Could not confirm the number',
+    pendingNoticeBody: 'Tap to return to the app',
   ),
 );
 ```
@@ -128,11 +161,11 @@ dependencies:
 - **Sync-based, not real-time.** With WhatsApp open, a registered number shows
   up in roughly 3–5 seconds, or about 10 seconds when WhatsApp starts cold.
   Treat the result as a hint for a warning label, not a security gate.
-- **`notRegistered` after a timeout is an inference.** It means WhatsApp was
-  open and did not mark the number in time. A slow device or network can turn
-  a valid number into `notRegistered`, so offer a retry and do not block the
-  user on it.
-- **`pending` is neutral.** It means "could not determine", not "invalid".
+- **`pending` is neutral.** It means "could not determine", not "invalid". A
+  number that is really not on WhatsApp also ends as `pending`, so offer a
+  retry and do not block the user on it.
+- **`notRegistered` comes only from `checkExisting()`.** It means the number
+  is not known on this device yet, not that WhatsApp checked it.
 - **Stores contacts on the device.** Checked numbers stay in a dedicated
   on-device account until the cache limit is reached or the app is
   uninstalled. They are hidden in the system Contacts app by default, but
@@ -152,7 +185,7 @@ dependencies:
 
 - Simple (most consumers): `verify()`, `WaPermissionGate`.
 - Advanced: `checkExisting()`, `checkWithInsert()`, `cancel()`,
-  `getDeviceInfo()`, `dispose()`.
+  `getDeviceInfo()`, `canDrawOverlays()`, `openOverlaySettings()`, `dispose()`.
 - `WaInputValidator` (debounce + cache for `onChanged`) is still available,
   but it inserts a contact for every plausible number typed and cannot open
   WhatsApp. A button that calls `verify()` is the recommended integration.

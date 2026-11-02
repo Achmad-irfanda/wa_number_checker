@@ -12,11 +12,11 @@
 //   3. WhatsApp only looks up new contacts while it is on screen, so the
 //      library can open it for you (see [confirmOpenWhatsApp]). While the
 //      user is in WhatsApp a progress notification is shown; it turns into a
-//      result notification as soon as the answer is known. Tapping it brings
-//      the user back here.
-//   4. `verify()` completes with the result. If WhatsApp was opened and the
-//      number did not show up before the timeout, the result is
-//      `notRegistered`.
+//      result notification as soon as the answer is known. Its button brings
+//      the user back here; after 4.5s the library also tries that by itself.
+//   4. `verify()` completes with the result. If the number did not show up
+//      before the timeout (8s), the result is `pending`. WhatsApp may need
+//      longer on a cold start, so offer another check.
 //
 // Checked numbers stay cached on the device (up to 100), so checking the same
 // registered number again finishes at step 1.
@@ -60,10 +60,19 @@ class _ExampleHomeState extends State<ExampleHome> {
   /// True while a check is running; disables the button.
   bool checking = false;
 
+  /// True once the user allowed this app to draw over other apps.
+  bool overlayGranted = false;
+
+  /// The overlay permission is granted in Settings, not in a dialog, so it is
+  /// read again whenever the user comes back to this app.
+  late final AppLifecycleListener lifecycle;
+
   @override
   void initState() {
     super.initState();
     _initChecker();
+    lifecycle = AppLifecycleListener(onResume: loadOverlayState);
+    loadOverlayState();
   }
 
   void _initChecker() {
@@ -78,6 +87,7 @@ class _ExampleHomeState extends State<ExampleHome> {
   @override
   void dispose() {
     // Stops any running check and releases the contacts observer.
+    lifecycle.dispose();
     checker.dispose();
     phoneCtrl.dispose();
     super.dispose();
@@ -85,16 +95,15 @@ class _ExampleHomeState extends State<ExampleHome> {
 
   /// Turns a result into the text shown under the input field.
   ///
-  /// Only `registered` and `notRegistered` are definite answers. Every other
-  /// status means the check could not be completed, so do not treat those as
-  /// "invalid number".
+  /// Only `registered` is a definite answer. Every other status means the
+  /// number could not be confirmed, so do not treat those as "invalid number".
   String label(WaCheckResult? r) => switch (r?.status) {
     null => 'Type a number, then tap Check and Verify',
     WaCheckStatus.registered =>
       '✓ WA detected (${r!.detectedBy.map((e) => e.name).join(', ')})',
     WaCheckStatus.notRegistered =>
       '⚠ Number is not registered on WA, double-check it',
-    WaCheckStatus.pending => '… could not be determined (pending/timeout)',
+    WaCheckStatus.pending => '… could not be determined, tap to check again',
     WaCheckStatus.offline => '… offline — check was not run',
     WaCheckStatus.waNotInstalled => '… WA is not installed on this device',
     WaCheckStatus.waNotActive => '… WA is installed but not logged in',
@@ -125,6 +134,11 @@ class _ExampleHomeState extends State<ExampleHome> {
     await loadInfo();
   }
 
+  Future<void> loadOverlayState() async {
+    final granted = await checker.canDrawOverlays();
+    if (mounted) setState(() => overlayGranted = granted);
+  }
+
   /// Asks the user whether WhatsApp may be opened for this check.
   ///
   /// The library calls this only when the local lookup found nothing, so
@@ -140,8 +154,8 @@ class _ExampleHomeState extends State<ExampleHome> {
         content: const Text(
           'WhatsApp on this device does not know this number yet. We will '
           'open WhatsApp for a few seconds to verify it.\n\n'
-          'A notification shows the progress. Tap it when it is finished '
-          'to come back to this app.',
+          'A notification shows the result. Tap its button to come back '
+          'to this app; if WhatsApp was just starting, check again.',
         ),
         actions: [
           TextButton(
@@ -175,6 +189,22 @@ class _ExampleHomeState extends State<ExampleHome> {
       phoneCtrl.text.trim(), // Accepts 08xx, 62xx and +62xx.
       // Leave this out if your app must never open WhatsApp.
       confirmOpenWhatsApp: confirmOpenWhatsApp,
+    );
+    if (mounted) setState(() => result = r);
+    setState(() => checking = false);
+  }
+
+  /// Opens WhatsApp without asking and shows the progress and the result in
+  /// a card on top of it, instead of notifications.
+  ///
+  /// WhatsApp stays closed when the number is already known on this device,
+  /// because the local lookup answers first.
+  Future<void> checkWithOverlay() async {
+    setState(() => checking = true);
+    final r = await checker.verify(
+      phoneCtrl.text.trim(),
+      confirmOpenWhatsApp: () async => true,
+      useOverlay: true,
     );
     if (mounted) setState(() => result = r);
     setState(() => checking = false);
@@ -248,6 +278,32 @@ class _ExampleHomeState extends State<ExampleHome> {
                 ElevatedButton(
                   onPressed: checking ? null : checkNow,
                   child: const Text(' Check and Verify'),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          const Text(
+            'Alert window:',
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 6),
+          Center(
+            child: Wrap(
+              spacing: 8,
+              children: [
+                ElevatedButton(
+                  // Opens Settings: find this app and allow it there.
+                  onPressed: checker.openOverlaySettings,
+                  child: Text(
+                    overlayGranted ? 'Overlay allowed ✓' : 'Allow Overlay',
+                  ),
+                ),
+                ElevatedButton(
+                  onPressed: checking || !overlayGranted
+                      ? null
+                      : checkWithOverlay,
+                  child: const Text('Open WA + Overlay'),
                 ),
               ],
             ),

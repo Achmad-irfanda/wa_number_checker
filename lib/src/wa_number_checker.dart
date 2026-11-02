@@ -37,6 +37,7 @@ class WaNumberChecker {
   int _generation = 0;
   int? _lastContactId;
   DateTime? _lastInsertAt;
+  String? _lastInsertPhone;
   bool _disposed = false;
   StreamSubscription? _observerSub;
 
@@ -45,6 +46,9 @@ class WaNumberChecker {
 
   /// Menutup notifikasi "kembali ke app" saat user sudah kembali.
   AppLifecycleListener? _lifecycle;
+
+  /// Percobaan kembali ke app bila tombol notifikasi hasil belum ditekan.
+  Timer? _returnTimer;
 
   Future<WaCheckResult>? _ongoingVerify;
   String? _ongoingPhone;
@@ -56,11 +60,16 @@ class WaNumberChecker {
   /// [confirmOpenWhatsApp] (mis. dialog persetujuan) agar WA dibuka saat
   /// insert memang diperlukan; setelah selesai user mendapat notifikasi
   /// untuk kembali. Callback hanya dipanggil bila fast-path gagal.
+  ///
+  /// [useOverlay] menampilkan status di kartu di atas WA, bukan notifikasi.
+  /// Butuh izin overlay (lihat [canDrawOverlays]); tanpa itu notifikasi
+  /// tetap dipakai.
   Future<WaCheckResult> verify(
     String phone, {
     Duration? timeout,
     bool? cleanup,
     Future<bool> Function()? confirmOpenWhatsApp,
+    bool useOverlay = false,
   }) async {
     final normalized = normalizeWaPhone(phone);
     if (_ongoingVerify != null && _ongoingPhone == normalized) {
@@ -72,6 +81,7 @@ class WaNumberChecker {
       timeout: timeout,
       cleanup: cleanup,
       confirmOpenWhatsApp: confirmOpenWhatsApp,
+      useOverlay: useOverlay,
     );
     _ongoingPhone = normalized;
     _ongoingVerify = future;
@@ -91,8 +101,10 @@ class WaNumberChecker {
     Duration? timeout,
     bool? cleanup,
     Future<bool> Function()? confirmOpenWhatsApp,
+    bool useOverlay = false,
   }) async {
     final myGen = ++_generation;
+    _clearPendingReturn();
     final clean = cleanup ?? config.autoCleanup;
 
     bool cancelled() => myGen != _generation || _disposed;
@@ -158,9 +170,11 @@ class WaNumberChecker {
             ).copyNormalized(normalized);
     }
 
-    // 3. Rate-limit insert (anti enumerasi + hemat resource).
+    // 3. Rate-limit insert (anti enumerasi + hemat resource). Retry nomor
+    // yang sama lolos: kontaknya dipakai ulang, tidak ada insert baru.
     final now = DateTime.now();
     if (_lastInsertAt != null &&
+        _lastInsertPhone != normalized &&
         now.difference(_lastInsertAt!) < config.minInsertInterval) {
       return WaCheckResult(
         status: WaCheckStatus.pending,
@@ -186,6 +200,7 @@ class WaNumberChecker {
       generation: myGen,
       preloadedInfo: info,
       openWhatsApp: openWa,
+      useOverlay: useOverlay,
     );
   }
 
@@ -266,7 +281,7 @@ class WaNumberChecker {
   /// [cancel] otomatis dipanggil untuk watch sebelumnya.
   ///
   /// [openWhatsApp] membuka WA setelah insert (pemicu WA mengecek nomor
-  /// baru) dan memberi notifikasi "kembali ke app" saat hasilnya keluar.
+  /// baru) dan memberi notifikasi hasil + tombol kembali saat selesai.
   Future<WaCheckResult> checkWithInsert(
     String phone, {
     Duration? timeout,
@@ -274,8 +289,10 @@ class WaNumberChecker {
     int? generation,
     WaDeviceInfo? preloadedInfo,
     bool openWhatsApp = false,
+    bool useOverlay = false,
   }) async {
     final myGen = generation ?? ++_generation;
+    _clearPendingReturn();
     final normalized = normalizeWaPhone(phone);
     final limit =
         timeout ?? (openWhatsApp ? config.openWhatsAppTimeout : config.timeout);
@@ -313,6 +330,7 @@ class WaNumberChecker {
       contactId = ins.contactId;
       _lastContactId = contactId;
       _lastInsertAt = DateTime.now();
+      _lastInsertPhone = normalized;
     } catch (_) {
       await _bridge.stopObserver();
       // Mis. ROM menolak write (kebijakan akun default).
@@ -339,6 +357,7 @@ class WaNumberChecker {
 
     var finishing = false;
     var waOpened = false;
+    var overlayShown = false;
     late final Future<void> Function() abort;
 
     Future<void> finish(WaCheckResult r, {bool forceCleanup = false}) async {
@@ -355,14 +374,13 @@ class WaNumberChecker {
         _lastContactId = null;
       }
       if (waOpened) {
-        var returned = false;
-        if (config.autoReturn && r.status != WaCheckStatus.cancelled) {
-          returned = await _bridge.bringAppToForeground();
-        }
-        if (returned) {
-          await _bridge.cancelReturnNotice();
+        if (overlayShown) {
+          await _showOverlayResult(r.status);
         } else {
           await _showReturnNotice(r.status);
+        }
+        if (config.autoReturn && r.status != WaCheckStatus.cancelled) {
+          _scheduleReturn();
         }
       }
       completer.complete(r);
@@ -413,11 +431,15 @@ class WaNumberChecker {
     );
     await poll();
     if (openWhatsApp && !finishing) {
+      // Diset sebelum await: hasil bisa keluar saat WA sedang dibuka.
+      waOpened = true;
       waOpened = await _bridge.openWhatsApp();
       if (waOpened) {
         hints.add('waOpened');
         _lifecycle ??= AppLifecycleListener(
           onResume: () {
+            _returnTimer?.cancel();
+            _bridge.hideOverlay();
             // Hanya bersihkan notifikasi bila verifikasi sudah selesai.
             // Jika proses masih berjalan dan user kembali ke app,
             // notifikasi progress tetap berjalan namun tombol "kembali" disembunyikan.
@@ -435,24 +457,33 @@ class WaNumberChecker {
             }
           },
         );
-        await _bridge.showProgressNotice(
-          config.progressNoticeTitle,
-          config.progressNoticeBody,
-          limit,
-          actionText: config.returnActionText,
-          style: config.noticeStyle.name,
-        );
+        if (!finishing && useOverlay) {
+          // Diset sebelum await, sama seperti waOpened.
+          overlayShown = true;
+          overlayShown = await _bridge.showOverlay(
+            config.progressNoticeTitle,
+            config.progressNoticeBody,
+            limit,
+            actionText: config.returnActionText,
+          );
+        }
+        if (!finishing && !overlayShown) {
+          await _bridge.showProgressNotice(
+            config.progressNoticeTitle,
+            config.progressNoticeBody,
+            limit,
+            actionText: config.returnActionText,
+            style: config.noticeStyle.name,
+          );
+        }
       }
     }
     timer = Timer(limit, () async {
-      // Tanpa WA terbuka, timeout bukan vonis negatif → pending. Dengan WA
-      // terbuka nomor terdaftar muncul dalam hitungan detik, jadi habisnya
-      // waktu dibaca sebagai tidak terdaftar.
+      // Timeout bukan vonis negatif, juga saat WA terbuka: start dari mati
+      // bisa lebih lama dari batas tunggu.
       await finish(
         WaCheckResult(
-          status: waOpened
-              ? WaCheckStatus.notRegistered
-              : WaCheckStatus.pending,
+          status: WaCheckStatus.pending,
           normalized: normalized,
           installedApps: info.installedApps,
           activeApps: info.activeApps,
@@ -473,13 +504,59 @@ class WaNumberChecker {
 
   Future<WaDeviceInfo> getDeviceInfo() => _bridge.getDeviceInfo();
 
+  /// True bila user sudah mengizinkan app tampil di atas app lain.
+  /// App consumer wajib mendeklarasikan `SYSTEM_ALERT_WINDOW` sendiri.
+  Future<bool> canDrawOverlays() => _bridge.canDrawOverlays();
+
+  /// Buka Settings untuk izin overlay. Tidak ada dialog runtime; cek ulang
+  /// [canDrawOverlays] saat user kembali ke app.
+  Future<bool> openOverlaySettings() => _bridge.openOverlaySettings();
+
   /// Batalkan watch yang sedang berjalan + bersihkan sisa kontak temp.
   Future<void> cancel() async {
     _generation++;
+    _clearPendingReturn();
     await _abortWatch?.call();
     final id = _lastContactId;
     _lastContactId = null;
     await _finishWatch(contactId: id, cleanup: true);
+  }
+
+  /// Android bisa memblokir activity dari background tanpa error. Notifikasi
+  /// hasil dibiarkan ada dan baru ditutup `onResume` bila app benar-benar
+  /// kembali, jadi user tetap punya jalan kembali.
+  void _scheduleReturn() {
+    _returnTimer?.cancel();
+    _returnTimer = Timer(config.autoReturnDelay, () {
+      final state = WidgetsBinding.instance.lifecycleState;
+      if (state != AppLifecycleState.resumed) {
+        _bridge.bringAppToForeground();
+      }
+    });
+  }
+
+  void _clearPendingReturn() {
+    _returnTimer?.cancel();
+    _bridge.hideOverlay();
+  }
+
+  /// Kartu progress diganti kartu hasil + tombol kembali. Notifikasi jadi
+  /// cadangan bila kartu gagal tampil, mis. izin dicabut di tengah proses.
+  Future<void> _showOverlayResult(WaCheckStatus status) async {
+    final state = WidgetsBinding.instance.lifecycleState;
+    if (status == WaCheckStatus.cancelled ||
+        state == AppLifecycleState.resumed) {
+      await _bridge.hideOverlay();
+      return;
+    }
+    final registered = status == WaCheckStatus.registered;
+    final shown = await _bridge.showOverlay(
+      registered ? config.returnNoticeTitle : config.pendingNoticeTitle,
+      registered ? config.returnNoticeBody : config.pendingNoticeBody,
+      Duration.zero,
+      actionText: config.returnActionText,
+    );
+    if (!shown) await _showReturnNotice(status);
   }
 
   /// User masih di WA saat hasil keluar → notifikasi progress diganti
@@ -492,10 +569,10 @@ class WaNumberChecker {
       await _bridge.cancelReturnNotice();
       return;
     }
-    final invalid = status == WaCheckStatus.notRegistered;
+    final registered = status == WaCheckStatus.registered;
     await _bridge.showReturnNotice(
-      invalid ? config.notRegisteredNoticeTitle : config.returnNoticeTitle,
-      invalid ? config.notRegisteredNoticeBody : config.returnNoticeBody,
+      registered ? config.returnNoticeTitle : config.pendingNoticeTitle,
+      registered ? config.returnNoticeBody : config.pendingNoticeBody,
       actionText: config.returnActionText,
       style: config.noticeStyle.name,
     );
@@ -516,6 +593,7 @@ class WaNumberChecker {
   void dispose() {
     _disposed = true;
     _generation++;
+    _clearPendingReturn();
     _observerSub?.cancel();
     _bridge.stopObserver();
     _lifecycle?.dispose();
