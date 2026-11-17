@@ -32,6 +32,40 @@ if (r.isValid) {
 }
 ```
 
+### Custom rationale UI
+
+`ensureReady` shows a built-in `AlertDialog` before the system permission
+dialog. To use your own UI (dialog, bottom sheet, page), pass `customDialog`.
+It is called only when the permission is not granted yet; return `true` to
+continue to the system dialog.
+
+```dart
+await WaPermissionGate.ensureReady(
+  context,
+  appName: 'MyApp',
+  purpose: 'verify your WhatsApp number for one-time passwords',
+  customDialog: (context, rationale) => showModalBottomSheet<bool>(
+    context: context,
+    builder: (c) => Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(rationale.title),
+        Text(rationale.message),
+        Text(rationale.disclosure), // keep this: Play Store disclosure
+        FilledButton(
+          onPressed: () => Navigator.of(c).pop(true),
+          child: const Text('Continue'),
+        ),
+      ],
+    ),
+  ),
+);
+```
+
+`rationale` carries the same `title`, `message` and `disclosure` texts as the
+built-in dialog. See `example/lib/custom_dialog.dart` for a complete bottom
+sheet.
+
 ## How it works
 
 1. **Local lookup** (`checkExisting()`). Read-only. If WhatsApp has already

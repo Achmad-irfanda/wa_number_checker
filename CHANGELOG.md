@@ -1,3 +1,12 @@
+## Unreleased
+
+**Added**
+
+* `WaPermissionGate.ensureReady(customDialog: ...)`: show your own rationale
+  UI (dialog, bottom sheet, page) instead of the built-in dialog. The callback
+  receives a `WaPermissionRationale` with the built-in `title`, `message` and
+  `disclosure` texts, and is called only when the permission is not granted.
+
 ## 0.3.0
 
 **Behavior changes**

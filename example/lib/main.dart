@@ -24,6 +24,8 @@
 import 'package:flutter/material.dart';
 import 'package:wa_number_checker/wa_number_checker.dart';
 
+import 'custom_dialog.dart';
+
 void main() => runApp(const ExampleApp());
 
 class ExampleApp extends StatelessWidget {
@@ -130,6 +132,9 @@ class _ExampleHomeState extends State<ExampleHome> {
       appName: 'App Checker WhatsApp',
       // Shown inside the explanation dialog, which is in Indonesian.
       purpose: 'memverifikasi nomor WA milikmu untuk demo ini',
+      // Optional: your own UI instead of the built-in dialog (see
+      // custom_dialog.dart). Leave it out to use the built-in AlertDialog.
+      customDialog: customModalBottomSheet,
     );
     await loadInfo();
   }

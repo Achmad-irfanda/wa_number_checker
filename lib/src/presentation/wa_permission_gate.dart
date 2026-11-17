@@ -1,6 +1,46 @@
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+/// Teks penjelasan izin Kontak yang dipakai dialog bawaan
+/// [WaPermissionGate.ensureReady].
+///
+/// Diteruskan ke [WaPermissionDialogBuilder] agar UI custom bisa memakai
+/// teks yang sama, terutama [disclosure] yang dibutuhkan untuk prominent
+/// disclosure Play Store.
+class WaPermissionRationale {
+  const WaPermissionRationale({required this.appName, required this.purpose});
+
+  /// Nama app consumer, dari `ensureReady(appName: ...)`.
+  final String appName;
+
+  /// Tujuan akses Kontak, dari `ensureReady(purpose: ...)`.
+  final String purpose;
+
+  /// Contoh: "QRISKu butuh akses Kontak".
+  String get title => '$appName butuh akses Kontak';
+
+  /// Contoh: "QRISKu perlu akses Kontak untuk memverifikasi nomor WA ...".
+  String get message => '$appName perlu akses Kontak untuk $purpose.';
+
+  /// Cara library memakai Kontak. Tampilkan juga di UI custom.
+  String get disclosure =>
+      'Nomor dicek lewat kontak sementara di akun khusus '
+      'milik aplikasi ini (tidak dikirim ke server, tidak disimpan '
+      'ke Google) dan otomatis dihapus setelah pengecekan.';
+}
+
+/// UI penjelasan milik app consumer yang ditampilkan sebelum dialog izin
+/// sistem. Bebas berupa dialog, bottom sheet, atau halaman.
+///
+/// Return `true` untuk lanjut ke dialog izin sistem. `false` atau `null`
+/// (misalnya ditutup dengan swipe atau tap di luar) membatalkan, dan
+/// [WaPermissionGate.ensureReady] mengembalikan `false`.
+typedef WaPermissionDialogBuilder =
+    Future<bool?> Function(
+      BuildContext context,
+      WaPermissionRationale rationale,
+    );
+
 /// Pintu masuk izin Kontak dengan prominent disclosure milik app consumer.
 ///
 /// Dialog sistem Android selalu menampilkan **nama app consumer**
@@ -20,23 +60,49 @@ import 'package:permission_handler/permission_handler.dart';
 class WaPermissionGate {
   /// Tampilkan rationale (dengan [appName] consumer) lalu minta izin.
   /// Return true jika [Permission.contacts] granted.
+  ///
+  /// [customDialog] mengganti dialog bawaan dengan UI milik app consumer.
+  /// Hanya dipanggil jika izin belum granted. Untuk review Play Store, UI
+  /// tersebut tetap harus menjelaskan data apa yang diakses dan untuk apa;
+  /// gunakan [WaPermissionRationale.disclosure].
+  ///
+  /// ```dart
+  /// await WaPermissionGate.ensureReady(
+  ///   context,
+  ///   appName: 'QRISKu',
+  ///   purpose: 'memverifikasi nomor WA milikmu',
+  ///   customDialog: (context, rationale) => showModalBottomSheet<bool>(
+  ///     context: context,
+  ///     builder: (_) => MyRationaleSheet(rationale: rationale),
+  ///   ),
+  /// );
+  /// ```
   static Future<bool> ensureReady(
     BuildContext context, {
     required String appName,
     required String purpose,
+    WaPermissionDialogBuilder? customDialog,
   }) async {
     if (await Permission.contacts.isGranted) return true;
     if (!context.mounted) return false;
-    final proceed = await showDialog<bool>(
+
+    final rationale = WaPermissionRationale(appName: appName, purpose: purpose);
+    final show = customDialog ?? _showDefaultDialog;
+    final proceed = await show(context, rationale);
+    if (proceed != true) return false;
+    final res = await Permission.contacts.request();
+    return res.isGranted;
+  }
+
+  static Future<bool?> _showDefaultDialog(
+    BuildContext context,
+    WaPermissionRationale rationale,
+  ) {
+    return showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
-        title: Text('$appName butuh akses Kontak'),
-        content: Text(
-          '$appName perlu akses Kontak untuk $purpose.\n\n'
-          'Nomor dicek lewat kontak sementara di akun khusus '
-          'milik aplikasi ini (tidak dikirim ke server, tidak disimpan '
-          'ke Google) dan otomatis dihapus setelah pengecekan.',
-        ),
+        title: Text(rationale.title),
+        content: Text('${rationale.message}\n\n${rationale.disclosure}'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(c).pop(false),
@@ -49,9 +115,6 @@ class WaPermissionGate {
         ],
       ),
     );
-    if (proceed != true) return false;
-    final res = await Permission.contacts.request();
-    return res.isGranted;
   }
 
   /// Izin notifikasi (Android 13+) untuk notifikasi "kembali ke app"
