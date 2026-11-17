@@ -35,36 +35,44 @@ if (r.isValid) {
 ### Custom rationale UI
 
 `ensureReady` shows a built-in `AlertDialog` before the system permission
-dialog. To use your own UI (dialog, bottom sheet, page), pass `customDialog`.
-It is called only when the permission is not granted yet; return `true` to
-continue to the system dialog.
+dialog. To show your own widget instead, pass `customWidget` and choose how
+the package presents it. It is shown only when the permission is not granted
+yet. Close it with `Navigator.of(context).pop(true)` to continue to the
+system dialog, or `pop(false)` to cancel.
 
 ```dart
 await WaPermissionGate.ensureReady(
   context,
   appName: 'MyApp',
   purpose: 'verify your WhatsApp number for one-time passwords',
-  customDialog: (context, rationale) => showModalBottomSheet<bool>(
-    context: context,
-    builder: (c) => Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(rationale.title),
-        Text(rationale.message),
-        Text(rationale.disclosure), // keep this: Play Store disclosure
-        FilledButton(
-          onPressed: () => Navigator.of(c).pop(true),
-          child: const Text('Continue'),
-        ),
-      ],
-    ),
-  ),
+  customWidget: const MyRationaleSheet(),
+  presentation: WaPermissionPresentation.bottomSheet, // or .dialog
 );
+
+class MyRationaleSheet extends StatelessWidget {
+  const MyRationaleSheet({super.key});
+
+  @override
+  Widget build(BuildContext context) => Column(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      const Text('MyApp needs Contacts access to verify your number.'),
+      // Keep this: Play Store expects the disclosure before the system dialog.
+      const Text(WaPermissionRationale.defaultDisclosure),
+      FilledButton(
+        onPressed: () => Navigator.of(context).pop(true),
+        child: const Text('Continue'),
+      ),
+    ],
+  );
+}
 ```
 
-`rationale` carries the same `title`, `message` and `disclosure` texts as the
-built-in dialog. See `example/lib/custom_dialog.dart` for a complete bottom
-sheet.
+For full control over how it is shown (your own route, a full page,
+animations), pass `customDialog: (context, rationale) async => ...` instead
+and return `true` to continue. `rationale` carries the built-in `title`,
+`message` and `disclosure` texts. See `example/lib/custom_dialog.dart` for a
+complete bottom sheet.
 
 ## How it works
 

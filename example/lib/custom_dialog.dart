@@ -1,31 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:wa_number_checker/wa_number_checker.dart';
 
-/// Your own Contacts rationale UI, here a bottom sheet instead of the
-/// built-in dialog. Pass it as `WaPermissionGate.ensureReady(customDialog:)`.
+/// Your own Contacts rationale UI, built entirely by the app. Pass it as
+/// `WaPermissionGate.ensureReady(customWidget: ...)` with
+/// `presentation: WaPermissionPresentation.bottomSheet`; the library shows
+/// it only when the permission is not granted yet.
 ///
-/// The library calls it only when the permission is not granted yet, and
-/// opens the system permission dialog only when this returns `true`.
-/// "Nanti", swiping the sheet down or tapping outside returns `false`/`null`.
-Future<bool?> customModalBottomSheet(
-  BuildContext context,
-  WaPermissionRationale rationale,
-) {
-  return showModalBottomSheet<bool>(
-    context: context,
-    isScrollControlled: true,
-    showDragHandle: true,
-    builder: (_) =>
-        SafeArea(child: BottomSheetAutoVerifWa(rationale: rationale)),
-  );
-}
-
+/// Close it with `Navigator.of(context).pop(true)` to continue to the system
+/// permission dialog, or `pop(false)` to cancel. Swiping the sheet down or
+/// tapping outside also cancels.
 class BottomSheetAutoVerifWa extends StatelessWidget {
-  const BottomSheetAutoVerifWa({super.key, required this.rationale});
-
-  /// Same texts as the built-in dialog. Keep [WaPermissionRationale.disclosure]
-  /// visible: Play Store review expects it before the system dialog.
-  final WaPermissionRationale rationale;
+  const BottomSheetAutoVerifWa({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -36,11 +21,26 @@ class BottomSheetAutoVerifWa extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(rationale.title, style: textTheme.titleLarge),
+          const Icon(Icons.contacts_outlined, size: 48),
           const SizedBox(height: 12),
-          Text(rationale.message, style: textTheme.bodyLarge),
+          Text(
+            'Verifikasi nomor WhatsApp',
+            style: textTheme.titleLarge,
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'App Checker WhatsApp perlu akses Kontak untuk memverifikasi '
+            'nomor WA milikmu.',
+            style: textTheme.bodyLarge,
+          ),
           const SizedBox(height: 8),
-          Text(rationale.disclosure, style: textTheme.bodyMedium),
+          // Keep this text visible: Play Store review expects it before the
+          // system permission dialog.
+          Text(
+            WaPermissionRationale.defaultDisclosure,
+            style: textTheme.bodyMedium,
+          ),
           const SizedBox(height: 24),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),

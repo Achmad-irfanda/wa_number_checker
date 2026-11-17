@@ -1,3 +1,13 @@
+## 0.3.2
+
+**Added**
+
+* `WaPermissionGate.ensureReady(customWidget: ..., presentation: ...)`: pass
+  your own widget and the package shows it as a dialog or bottom sheet. Close
+  it with `Navigator.pop(true)` to continue to the system dialog.
+* `WaPermissionPresentation` (`dialog`, `bottomSheet`).
+* `WaPermissionRationale.defaultDisclosure`.
+
 ## 0.3.1
 
 **Added**

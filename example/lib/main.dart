@@ -132,9 +132,10 @@ class _ExampleHomeState extends State<ExampleHome> {
       appName: 'App Checker WhatsApp',
       // Shown inside the explanation dialog, which is in Indonesian.
       purpose: 'memverifikasi nomor WA milikmu untuk demo ini',
-      // Optional: your own UI instead of the built-in dialog (see
-      // custom_dialog.dart). Leave it out to use the built-in AlertDialog.
-      customDialog: customModalBottomSheet,
+      // Optional: your own widget instead of the built-in dialog (see
+      // custom_dialog.dart). Leave both out to use the built-in AlertDialog.
+      customWidget: const BottomSheetAutoVerifWa(),
+      presentation: WaPermissionPresentation.bottomSheet,
     );
     await loadInfo();
   }

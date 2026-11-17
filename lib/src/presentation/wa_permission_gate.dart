@@ -23,10 +23,23 @@ class WaPermissionRationale {
   String get message => '$appName perlu akses Kontak untuk $purpose.';
 
   /// Cara library memakai Kontak. Tampilkan juga di UI custom.
-  String get disclosure =>
+  String get disclosure => defaultDisclosure;
+
+  /// Sama dengan [disclosure], untuk widget custom yang tidak menerima
+  /// [WaPermissionRationale] (lihat `ensureReady(customWidget: ...)`).
+  static const String defaultDisclosure =
       'Nomor dicek lewat kontak sementara di akun khusus '
       'milik aplikasi ini (tidak dikirim ke server, tidak disimpan '
       'ke Google) dan otomatis dihapus setelah pengecekan.';
+}
+
+/// Cara library menampilkan `ensureReady(customWidget: ...)`.
+enum WaPermissionPresentation {
+  /// Lewat `showDialog`. Widget sebaiknya berupa `Dialog`/`AlertDialog`.
+  dialog,
+
+  /// Lewat `showModalBottomSheet` (scroll-controlled, dengan drag handle).
+  bottomSheet,
 }
 
 /// UI penjelasan milik app consumer yang ditampilkan sebelum dialog izin
@@ -61,37 +74,73 @@ class WaPermissionGate {
   /// Tampilkan rationale (dengan [appName] consumer) lalu minta izin.
   /// Return true jika [Permission.contacts] granted.
   ///
-  /// [customDialog] mengganti dialog bawaan dengan UI milik app consumer.
-  /// Hanya dipanggil jika izin belum granted. Untuk review Play Store, UI
-  /// tersebut tetap harus menjelaskan data apa yang diakses dan untuk apa;
-  /// gunakan [WaPermissionRationale.disclosure].
+  /// Dialog bawaan bisa diganti UI milik app consumer dengan salah satu dari:
+  ///
+  /// * [customWidget]: cukup kirim widget-nya; library menampilkannya sesuai
+  ///   [presentation]. Widget menutup dirinya sendiri dengan
+  ///   `Navigator.of(context).pop(true)` untuk lanjut ke dialog izin sistem,
+  ///   atau `pop(false)` untuk batal.
+  /// * [customDialog]: kontrol penuh atas cara menampilkan (route, animasi,
+  ///   halaman penuh, dll). Return `true` untuk lanjut.
+  ///
+  /// Keduanya hanya ditampilkan jika izin belum granted. Untuk review Play
+  /// Store, UI tersebut tetap harus menjelaskan data apa yang diakses dan
+  /// untuk apa; gunakan [WaPermissionRationale.defaultDisclosure].
   ///
   /// ```dart
   /// await WaPermissionGate.ensureReady(
   ///   context,
   ///   appName: 'QRISKu',
   ///   purpose: 'memverifikasi nomor WA milikmu',
-  ///   customDialog: (context, rationale) => showModalBottomSheet<bool>(
-  ///     context: context,
-  ///     builder: (_) => MyRationaleSheet(rationale: rationale),
-  ///   ),
+  ///   customWidget: const MyRationaleSheet(),
+  ///   presentation: WaPermissionPresentation.bottomSheet,
   /// );
   /// ```
   static Future<bool> ensureReady(
     BuildContext context, {
     required String appName,
     required String purpose,
+    Widget? customWidget,
+    WaPermissionPresentation presentation = WaPermissionPresentation.dialog,
     WaPermissionDialogBuilder? customDialog,
   }) async {
+    assert(
+      customWidget == null || customDialog == null,
+      'Pakai customWidget atau customDialog, jangan keduanya.',
+    );
     if (await Permission.contacts.isGranted) return true;
     if (!context.mounted) return false;
 
     final rationale = WaPermissionRationale(appName: appName, purpose: purpose);
-    final show = customDialog ?? _showDefaultDialog;
+    final show =
+        customDialog ??
+        (customWidget != null
+            ? (BuildContext c, WaPermissionRationale _) =>
+                  _showWidget(c, customWidget, presentation)
+            : _showDefaultDialog);
     final proceed = await show(context, rationale);
     if (proceed != true) return false;
     final res = await Permission.contacts.request();
     return res.isGranted;
+  }
+
+  static Future<bool?> _showWidget(
+    BuildContext context,
+    Widget widget,
+    WaPermissionPresentation presentation,
+  ) {
+    return switch (presentation) {
+      WaPermissionPresentation.dialog => showDialog<bool>(
+        context: context,
+        builder: (_) => widget,
+      ),
+      WaPermissionPresentation.bottomSheet => showModalBottomSheet<bool>(
+        context: context,
+        isScrollControlled: true,
+        showDragHandle: true,
+        builder: (_) => SafeArea(child: widget),
+      ),
+    };
   }
 
   static Future<bool?> _showDefaultDialog(
