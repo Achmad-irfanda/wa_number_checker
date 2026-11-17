@@ -20,6 +20,26 @@
 //
 // Checked numbers stay cached on the device (up to 100), so checking the same
 // registered number again finishes at step 1.
+//
+// Your app talks to the user at two points. They are separate steps with
+// separate callbacks, so do not pass one where the other is expected:
+//
+//   A. Before the first check: the Contacts permission.
+//      `WaPermissionGate.ensureReady()` shows a rationale (the "prominent
+//      disclosure" Google Play requires), then the system permission dialog.
+//      The rationale is the built-in dialog, or your own UI through
+//      `customWidget` or `customDialog` (see custom_dialog.dart and
+//      [ensure]). Signature of `customDialog`:
+//      `Future<bool?> Function(BuildContext, WaPermissionRationale)`.
+//
+//   B. During a check: opening WhatsApp.
+//      `verify(confirmOpenWhatsApp: ...)` is called only when the local
+//      lookup (step 1) found nothing, to ask whether WhatsApp may be opened
+//      (step 3). Signature: `Future<bool> Function()`, no arguments. See
+//      [confirmOpenWhatsApp].
+//
+// A typical flow: the user taps a button, the app awaits `ensureReady()`,
+// stops if it returned false, and otherwise awaits `verify()`.
 
 import 'package:flutter/material.dart';
 import 'package:wa_number_checker/wa_number_checker.dart';
@@ -27,6 +47,22 @@ import 'package:wa_number_checker/wa_number_checker.dart';
 import 'custom_dialog.dart';
 
 void main() => runApp(const ExampleApp());
+
+/// Your app's name. The system permission dialog always shows the real app
+/// name by itself; this one is for the rationale shown before it.
+const appName = 'App Checker WhatsApp';
+
+/// Which Contacts rationale [ensure] shows, to compare the three options.
+enum RationaleStyle {
+  /// The package's AlertDialog (Indonesian texts).
+  builtIn,
+
+  /// `customWidget`: [ContactsRationaleSheet], shown by the package.
+  customWidget,
+
+  /// `customDialog`: [showContactsRationaleSheet], shown by the app.
+  customDialog,
+}
 
 class ExampleApp extends StatelessWidget {
   const ExampleApp({super.key});
@@ -52,6 +88,7 @@ class _ExampleHomeState extends State<ExampleHome> {
   late WaNumberChecker checker;
   final phoneCtrl = TextEditingController(text: '08');
   WaNoticeStyle noticeStyle = WaNoticeStyle.standard;
+  RationaleStyle rationaleStyle = RationaleStyle.customWidget;
 
   /// Result of the last check, or null if the number changed since then.
   WaCheckResult? result;
@@ -120,24 +157,40 @@ class _ExampleHomeState extends State<ExampleHome> {
     if (mounted) setState(() => info = i);
   }
 
-  /// Step 1 for every app: ask for the Contacts permission.
+  /// Point A (see the top of this file): the Contacts permission.
   ///
   /// The library never requests permissions on its own. `ensureReady` shows
-  /// an explanation dialog with your app name first (required by Play Store
-  /// for contacts access), then the system permission dialog. Without this
+  /// a rationale with your app name first (required by Play Store for
+  /// contacts access), then the system permission dialog. Without this
   /// permission `verify()` returns `permissionDenied`.
-  Future<void> ensure() async {
-    await WaPermissionGate.ensureReady(
+  ///
+  /// Returns `true` when the permission is granted. When it is already
+  /// granted, nothing is shown and this returns `true` right away, so it is
+  /// cheap to call before every check.
+  ///
+  /// Pass at most one of `customWidget` and `customDialog`; leave both out
+  /// for the built-in dialog. Here [rationaleStyle] picks one so the three
+  /// options can be compared in the demo.
+  Future<bool> ensure() async {
+    final granted = await WaPermissionGate.ensureReady(
       context,
-      appName: 'App Checker WhatsApp',
-      // Shown inside the explanation dialog, which is in Indonesian.
+      appName: appName,
+      // Used only by the built-in dialog, which is in Indonesian, so this
+      // text is Indonesian too. Your own UI writes its own message.
       purpose: 'memverifikasi nomor WA milikmu untuk demo ini',
-      // Optional: your own widget instead of the built-in dialog (see
-      // custom_dialog.dart). Leave both out to use the built-in AlertDialog.
-      customWidget: const BottomSheetAutoVerifWa(),
+      // Option 1: your widget, shown by the package as a bottom sheet.
+      customWidget: rationaleStyle == RationaleStyle.customWidget
+          ? const ContactsRationaleSheet(appName: appName)
+          : null,
       presentation: WaPermissionPresentation.bottomSheet,
+      // Option 2: your function, which shows the UI itself. Pass the
+      // function, not `showContactsRationaleSheet(...)`.
+      customDialog: rationaleStyle == RationaleStyle.customDialog
+          ? showContactsRationaleSheet
+          : null,
     );
     await loadInfo();
+    return granted;
   }
 
   Future<void> loadOverlayState() async {
@@ -145,13 +198,21 @@ class _ExampleHomeState extends State<ExampleHome> {
     if (mounted) setState(() => overlayGranted = granted);
   }
 
-  /// Asks the user whether WhatsApp may be opened for this check.
+  /// Point B (see the top of this file): asks the user whether WhatsApp may
+  /// be opened for this check. Passed to `verify(confirmOpenWhatsApp: ...)`.
   ///
   /// The library calls this only when the local lookup found nothing, so
-  /// users are not interrupted for numbers that are already known.
+  /// users are not interrupted for numbers that are already known. It is not
+  /// the Contacts rationale: by now the permission is already granted.
   ///
-  /// Return `true` to open WhatsApp, or `false` to check without opening it.
-  /// Without opening WhatsApp a new number usually ends as `pending`.
+  /// Signature: `Future<bool> Function()`, no arguments. Return `true` to
+  /// open WhatsApp, or `false` to check without opening it. Without opening
+  /// WhatsApp a new number usually ends as `pending`.
+  ///
+  /// Any UI works here, including a bottom sheet. If your sheet helper does
+  /// not return a value (for example it has an `onClosed` callback), complete
+  /// a `Completer<bool>` from its buttons and from `onClosed`, and return
+  /// that completer's future.
   Future<bool> confirmOpenWhatsApp() async {
     final ok = await showDialog<bool>(
       context: context,
@@ -189,15 +250,20 @@ class _ExampleHomeState extends State<ExampleHome> {
   /// `verify()` does the whole flow described at the top of this file and
   /// completes as soon as the answer is known. It keeps running while the
   /// user is in WhatsApp, so the result is already here when they return.
+  ///
+  /// The permission is ensured first. If the user declines, the check is not
+  /// run, so a declined permission is not shown as a failed check.
   Future<void> checkNow() async {
+    if (!await ensure() || !mounted) return;
     setState(() => checking = true);
     final r = await checker.verify(
       phoneCtrl.text.trim(), // Accepts 08xx, 62xx and +62xx.
+      // Point B. Pass the method itself, not `confirmOpenWhatsApp()`.
       // Leave this out if your app must never open WhatsApp.
       confirmOpenWhatsApp: confirmOpenWhatsApp,
     );
     if (mounted) setState(() => result = r);
-    setState(() => checking = false);
+    if (mounted) setState(() => checking = false);
   }
 
   /// Opens WhatsApp without asking and shows the progress and the result in
@@ -206,6 +272,7 @@ class _ExampleHomeState extends State<ExampleHome> {
   /// WhatsApp stays closed when the number is already known on this device,
   /// because the local lookup answers first.
   Future<void> checkWithOverlay() async {
+    if (!await ensure() || !mounted) return;
     setState(() => checking = true);
     final r = await checker.verify(
       phoneCtrl.text.trim(),
@@ -213,7 +280,7 @@ class _ExampleHomeState extends State<ExampleHome> {
       useOverlay: true,
     );
     if (mounted) setState(() => result = r);
-    setState(() => checking = false);
+    if (mounted) setState(() => checking = false);
   }
 
   @override
@@ -240,7 +307,7 @@ class _ExampleHomeState extends State<ExampleHome> {
               if (result != null) setState(() => result = null);
             },
             decoration: const InputDecoration(
-              labelText: 'Nomor WA (08xx / +62 / 62)',
+              labelText: 'WhatsApp number (08xx / +62 / 62)',
               border: OutlineInputBorder(),
             ),
           ),
@@ -271,6 +338,37 @@ class _ExampleHomeState extends State<ExampleHome> {
                 _initChecker();
               });
             },
+          ),
+          const SizedBox(height: 14),
+          const Text(
+            'Contacts rationale UI:',
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 6),
+          SegmentedButton<RationaleStyle>(
+            segments: const [
+              ButtonSegment(
+                value: RationaleStyle.builtIn,
+                label: Text('Built-in'),
+              ),
+              ButtonSegment(
+                value: RationaleStyle.customWidget,
+                label: Text('customWidget'),
+              ),
+              ButtonSegment(
+                value: RationaleStyle.customDialog,
+                label: Text('customDialog'),
+              ),
+            ],
+            selected: {rationaleStyle},
+            onSelectionChanged: (val) =>
+                setState(() => rationaleStyle = val.first),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Shown only while the Contacts permission is not granted. Revoke '
+            'it in Android Settings to see it again.',
+            style: TextStyle(fontSize: 11),
           ),
           const SizedBox(height: 14),
           Center(

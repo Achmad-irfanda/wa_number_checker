@@ -71,8 +71,17 @@ class MyRationaleSheet extends StatelessWidget {
 For full control over how it is shown (your own route, a full page,
 animations), pass `customDialog: (context, rationale) async => ...` instead
 and return `true` to continue. `rationale` carries the built-in `title`,
-`message` and `disclosure` texts. See `example/lib/custom_dialog.dart` for a
-complete bottom sheet.
+`message` and `disclosure` texts. Pass the function itself
+(`customDialog: showMySheet`), not the result of calling it.
+
+The built-in dialog and `WaPermissionRationale.defaultDisclosure` are in
+Indonesian. For another language, write your own disclosure text in your UI.
+
+The rationale is not the same as `verify(confirmOpenWhatsApp: ...)`. That
+callback (`Future<bool> Function()`, no arguments) runs later, during a
+check, and asks whether WhatsApp may be opened.
+
+See `example/lib/custom_dialog.dart` for both options, documented in full.
 
 ## How it works
 

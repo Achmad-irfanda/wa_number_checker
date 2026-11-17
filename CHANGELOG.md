@@ -1,3 +1,16 @@
+## 0.3.3
+
+**Documentation**
+
+* The example is now fully documented in English. It explains the two points
+  where the app talks to the user (the Contacts rationale in `ensureReady()`
+  and `verify(confirmOpenWhatsApp: ...)`), and lets you compare the built-in
+  dialog, `customWidget` and `customDialog`.
+* The example checks the permission before every check and stops when it is
+  declined.
+* README: notes on passing `customDialog` as a function, the Indonesian
+  default texts, and how the rationale differs from `confirmOpenWhatsApp`.
+
 ## 0.3.2
 
 **Added**
