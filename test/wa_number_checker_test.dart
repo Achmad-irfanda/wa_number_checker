@@ -84,6 +84,19 @@ void main() {
     });
   });
 
+  group('WaPermissionPresentation', () {
+    test('memiliki opsi dialog, bottomSheet, dan none', () {
+      expect(
+        WaPermissionPresentation.values,
+        containsAll([
+          WaPermissionPresentation.dialog,
+          WaPermissionPresentation.bottomSheet,
+          WaPermissionPresentation.none,
+        ]),
+      );
+    });
+  });
+
   group('platform selain Android', () {
     // Tanpa mock channel: kalau guard bocor, panggilan ini melempar
     // MissingPluginException.

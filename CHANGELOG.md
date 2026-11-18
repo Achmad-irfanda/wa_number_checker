@@ -1,3 +1,13 @@
+## 0.3.4
+
+**Added**
+
+* `WaPermissionPresentation.none`: skip any rationale UI (dialog or bottom sheet)
+  and directly request contacts permission via the system prompt.
+* `WaPermissionGate.ensureReady`: `appName` and `purpose` are now optional when
+  `presentation: WaPermissionPresentation.none` or when custom rationale UI is used.
+* Added `RationaleStyle.none` in example app.
+
 ## 0.3.3
 
 **Documentation**

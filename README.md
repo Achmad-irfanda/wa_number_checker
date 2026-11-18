@@ -46,8 +46,13 @@ await WaPermissionGate.ensureReady(
   appName: 'MyApp',
   purpose: 'verify your WhatsApp number for one-time passwords',
   customWidget: const MyRationaleSheet(),
-  presentation: WaPermissionPresentation.bottomSheet, // or .dialog
+  presentation: WaPermissionPresentation.bottomSheet, // or .dialog, .none
 );
+```
+
+Pass `presentation: WaPermissionPresentation.none` to skip any rationale UI entirely and directly trigger the system permission request (in which case `appName` and `purpose` are optional).
+
+```dart
 
 class MyRationaleSheet extends StatelessWidget {
   const MyRationaleSheet({super.key});

@@ -52,7 +52,7 @@ void main() => runApp(const ExampleApp());
 /// name by itself; this one is for the rationale shown before it.
 const appName = 'App Checker WhatsApp';
 
-/// Which Contacts rationale [ensure] shows, to compare the three options.
+/// Which Contacts rationale [ensure] shows, to compare the options.
 enum RationaleStyle {
   /// The package's AlertDialog (Indonesian texts).
   builtIn,
@@ -62,6 +62,9 @@ enum RationaleStyle {
 
   /// `customDialog`: [showContactsRationaleSheet], shown by the app.
   customDialog,
+
+  /// Direct system permission request without any rationale UI.
+  none,
 }
 
 class ExampleApp extends StatelessWidget {
@@ -182,7 +185,9 @@ class _ExampleHomeState extends State<ExampleHome> {
       customWidget: rationaleStyle == RationaleStyle.customWidget
           ? const ContactsRationaleSheet(appName: appName)
           : null,
-      presentation: WaPermissionPresentation.bottomSheet,
+      presentation: rationaleStyle == RationaleStyle.none
+          ? WaPermissionPresentation.none
+          : WaPermissionPresentation.bottomSheet,
       // Option 2: your function, which shows the UI itself. Pass the
       // function, not `showContactsRationaleSheet(...)`.
       customDialog: rationaleStyle == RationaleStyle.customDialog
@@ -358,6 +363,10 @@ class _ExampleHomeState extends State<ExampleHome> {
               ButtonSegment(
                 value: RationaleStyle.customDialog,
                 label: Text('customDialog'),
+              ),
+              ButtonSegment(
+                value: RationaleStyle.none,
+                label: Text('None'),
               ),
             ],
             selected: {rationaleStyle},

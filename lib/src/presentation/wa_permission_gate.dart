@@ -40,6 +40,10 @@ enum WaPermissionPresentation {
 
   /// Lewat `showModalBottomSheet` (scroll-controlled, dengan drag handle).
   bottomSheet,
+
+  /// Tanpa dialog atau modal penjelasan apapun. Langsung meminta izin
+  /// Kontak sistem jika belum diberikan.
+  none,
 }
 
 /// UI penjelasan milik app consumer yang ditampilkan sebelum dialog izin
@@ -98,8 +102,8 @@ class WaPermissionGate {
   /// ```
   static Future<bool> ensureReady(
     BuildContext context, {
-    required String appName,
-    required String purpose,
+    String? appName,
+    String? purpose,
     Widget? customWidget,
     WaPermissionPresentation presentation = WaPermissionPresentation.dialog,
     WaPermissionDialogBuilder? customDialog,
@@ -108,16 +112,32 @@ class WaPermissionGate {
       customWidget == null || customDialog == null,
       'Pakai customWidget atau customDialog, jangan keduanya.',
     );
+    assert(
+      presentation == WaPermissionPresentation.none ||
+          customWidget != null ||
+          customDialog != null ||
+          (appName != null && purpose != null),
+      'appName dan purpose dibutuhkan bila menampilkan dialog bawaan.',
+    );
     if (await Permission.contacts.isGranted) return true;
     if (!context.mounted) return false;
 
-    final rationale = WaPermissionRationale(appName: appName, purpose: purpose);
+    if (presentation == WaPermissionPresentation.none) {
+      final res = await Permission.contacts.request();
+      return res.isGranted;
+    }
+
+    final rationale = WaPermissionRationale(
+      appName: appName ?? '',
+      purpose: purpose ?? '',
+    );
     final show =
         customDialog ??
         (customWidget != null
             ? (BuildContext c, WaPermissionRationale _) =>
                   _showWidget(c, customWidget, presentation)
             : _showDefaultDialog);
+
     final proceed = await show(context, rationale);
     if (proceed != true) return false;
     final res = await Permission.contacts.request();
@@ -140,6 +160,7 @@ class WaPermissionGate {
         showDragHandle: true,
         builder: (_) => SafeArea(child: widget),
       ),
+      WaPermissionPresentation.none => Future.value(null),
     };
   }
 
